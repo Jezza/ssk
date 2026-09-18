@@ -69,7 +69,7 @@ pub fn classify(out: &SshOutput, key_path: &Path, fingerprint: &str) -> ProbeRes
     } else if out.stderr.contains("Permission denied") {
         ProbeResult::NotInstalled
     } else {
-        ProbeResult::Error(out.stderr.trim().to_string())
+        ProbeResult::Error(error_message(&out.stderr))
     }
 }
 
@@ -84,9 +84,32 @@ fn accepted(stderr: &str, key_path: &Path, fingerprint: &str) -> bool {
             Some(&line[at + ACCEPTS.len()..])
         })
         .any(|rest| {
-            (!key.is_empty() && rest.contains(&key))
+            (!key.is_empty() && rest.split_whitespace().next() == Some(key.as_str()))
                 || (!fingerprint.is_empty() && rest.contains(fingerprint))
         })
+}
+
+/// ssh runs at `LogLevel=DEBUG1` so it can name the accepted key (see `accepted` above),
+/// which fills stderr with `debug1: ...` chatter that isn't fit to show a user. Report the
+/// last non-empty, non-`debugN:` line instead — the actual failure ssh printed — falling
+/// back to the whole trimmed stderr if every line is debug output (or there is none).
+fn error_message(stderr: &str) -> String {
+    let trimmed = stderr.trim();
+    trimmed
+        .lines()
+        .rev()
+        .map(str::trim)
+        .find(|line| !line.is_empty() && !is_debug_line(line))
+        .map(str::to_string)
+        .unwrap_or_else(|| trimmed.to_string())
+}
+
+/// Matched case-insensitively, same as `ACCEPTS`: `debug1:`/`debug2:`/`debug3:`.
+fn is_debug_line(line: &str) -> bool {
+    let lower = line.to_ascii_lowercase();
+    ["debug1:", "debug2:", "debug3:"]
+        .iter()
+        .any(|prefix| lower.starts_with(prefix))
 }
 
 pub fn probe(
@@ -197,6 +220,24 @@ mod tests {
             ProbeResult::NotInstalled,
             "exit 0 with no accepts line proves nothing about our key"
         );
+        assert_eq!(
+            classify(
+                &accepted_line("debug1: Server accepts key: /k/work2 ED25519 SHA256:zzz explicit"),
+                Path::new("/k/work"),
+                "SHA256:abc"
+            ),
+            ProbeResult::NotInstalled,
+            "path match must be anchored: /k/work2 is not /k/work, foreign fingerprint too"
+        );
+        assert_eq!(
+            classify(
+                &accepted_line("debug1: Server accepts key: /k/work ED25519 SHA256:abc explicit"),
+                Path::new("/k/work"),
+                "SHA256:abc"
+            ),
+            ProbeResult::Installed,
+            "exact path match"
+        );
     }
 
     #[test]
@@ -218,6 +259,38 @@ mod tests {
         assert_eq!(
             classify(&odd, k, "SHA256:abc"),
             ProbeResult::Error("Host key verification failed.".into())
+        );
+    }
+
+    #[test]
+    fn error_strips_the_debug1_transcript_down_to_sshs_last_line() {
+        let out = SshOutput {
+            code: Some(255),
+            stdout: String::new(),
+            stderr: "debug1: Reading configuration data /etc/ssh/ssh_config\n\
+                     debug1: Connecting to h [1.2.3.4] port 22.\n\
+                     ssh: connect to host h port 22: Connection refused\n"
+                .to_string(),
+        };
+        assert_eq!(
+            classify(&out, Path::new("/k/work"), "SHA256:abc"),
+            ProbeResult::Error("ssh: connect to host h port 22: Connection refused".into())
+        );
+    }
+
+    #[test]
+    fn error_falls_back_to_the_whole_trimmed_stderr_when_only_debug_lines() {
+        let stderr = "debug1: Reading configuration data /etc/ssh/ssh_config\n\
+                       debug2: match not found\n"
+            .to_string();
+        let out = SshOutput {
+            code: Some(255),
+            stdout: String::new(),
+            stderr: stderr.clone(),
+        };
+        assert_eq!(
+            classify(&out, Path::new("/k/work"), "SHA256:abc"),
+            ProbeResult::Error(stderr.trim().to_string())
         );
     }
 
