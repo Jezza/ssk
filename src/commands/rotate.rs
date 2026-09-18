@@ -6,7 +6,7 @@
 use std::fs;
 use std::path::Path;
 
-use anyhow::Context;
+use anyhow::{Context, bail};
 
 use crate::cli::RotateArgs;
 use crate::commands::copy::{self, CopyOptions};
@@ -98,6 +98,14 @@ pub fn swap(ssh_dir: &Path, name: &str, lingering: &[Deployment], now: &str) -> 
     let path = |n: &str| ssh_dir.join(n);
     let pub_path = |n: &str| ssh_dir.join(format!("{n}.pub"));
     let (new_n, old_n) = (new_name(name), old_name(name));
+
+    // Validate everything before touching a single file: once the renames start, the old
+    // key may already be revoked from every host, so there is no going back.
+    let mut st = State::load(ssh_dir)?;
+    if !path(&new_n).is_file() || !pub_path(&new_n).is_file() {
+        bail!("{new_n} and {new_n}.pub must both exist to swap");
+    }
+
     let mv = |from: &Path, to: &Path| {
         fs::rename(from, to)
             .with_context(|| format!("renaming {} -> {}", from.display(), to.display()))
@@ -109,7 +117,6 @@ pub fn swap(ssh_dir: &Path, name: &str, lingering: &[Deployment], now: &str) -> 
     mv(&path(&new_n), &path(name))?;
     mv(&pub_path(&new_n), &pub_path(name))?;
 
-    let mut st = State::load(ssh_dir)?;
     st.identity.remove(&new_n);
     let previous_created = st.identity.get(name).and_then(|e| e.created.clone());
     {
@@ -138,9 +145,23 @@ pub fn run(settings: &Settings, ui: &Ui, args: &RotateArgs) -> anyhow::Result<u8
     let old = store::resolve(dir, &args.identity)?;
     old.public_key_line()?;
     let name = old.name.clone();
-    let deployments = State::load(dir)?.deployments(&name).to_vec();
+    let st = State::load(dir)?;
+    let deployments = st.deployments(&name).to_vec();
     let new_n = new_name(&name);
     let resume = dir.join(&new_n).is_file();
+
+    // A previous rotation may have left `<name>.old` behind (a revoke that never
+    // finished): swap would clobber that file and lose the record of where it still
+    // lives, so refuse until it is cleaned up.
+    let old_n = old_name(&name);
+    if dir.join(&old_n).exists()
+        || dir.join(format!("{old_n}.pub")).exists()
+        || st.is_managed(&old_n)
+    {
+        bail!(
+            "a previous rotation left {old_n} behind (it may still be installed somewhere); finish that first: ssk revoke {old_n} --all && ssk rm {old_n}"
+        );
+    }
 
     // What the new key will be.
     let key_type = args.key_type.unwrap_or(match old.algorithm.as_str() {
@@ -361,12 +382,11 @@ pub fn run(settings: &Settings, ui: &Ui, args: &RotateArgs) -> anyhow::Result<u8
         Ok(0)
     } else {
         let hosts: Vec<String> = lingering.iter().map(|d| d.endpoint()).collect();
-        let kept = old_name(&name);
         ui.warn(format!(
-            "old key kept as {kept}; still accepted on {}.",
+            "old key kept as {old_n}; still accepted on {}.",
             hosts.join(", ")
         ));
-        ui.hint(format!("ssk revoke {kept} --all && ssk rm {kept}"));
+        ui.hint(format!("ssk revoke {old_n} --all && ssk rm {old_n}"));
         Ok(1)
     }
 }
@@ -565,5 +585,28 @@ mod tests {
             st.identity["work.old"].created.as_deref(),
             Some("t-created")
         );
+    }
+
+    #[test]
+    fn swap_refuses_when_the_new_pub_is_missing() {
+        let (tmp, _old, _new) = fixture();
+        let d = tmp.path();
+        fs::remove_file(d.join("work.new.pub")).unwrap();
+
+        assert!(swap(d, "work", &[], "NOW").is_err());
+        assert!(d.join("work").exists());
+        assert!(d.join("work.pub").exists());
+        assert!(d.join("work.new").exists());
+    }
+
+    #[test]
+    fn swap_refuses_on_unreadable_state_before_touching_files() {
+        let (tmp, _old, _new) = fixture();
+        let d = tmp.path();
+        fs::write(d.join("ssk.toml"), "this is = not [toml").unwrap();
+
+        assert!(swap(d, "work", &[], "NOW").is_err());
+        assert!(d.join("work").exists());
+        assert!(d.join("work.new").exists());
     }
 }

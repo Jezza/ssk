@@ -161,6 +161,22 @@ fn rotate_keeps_the_old_key_when_a_revoke_fails() {
         2,
         "{state}"
     );
+
+    // A lingering `work.old` must block a second rotation, rather than being silently
+    // clobbered by it.
+    cmd(&w)
+        .args(["-y", "rotate", "work", "--no-passphrase"])
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains("work.old"))
+        .stderr(predicate::str::contains("ssk revoke work.old --all"));
+    assert_eq!(
+        blob(&w, "work.old"),
+        old,
+        "the lingering .old key is untouched"
+    );
+    assert!(!w.dir.join("work.new").exists(), "no new key was generated");
+
     cmd(&w)
         .args(["revoke", "work.old", "--all"])
         .assert()
