@@ -1,0 +1,7 @@
+[package]
+name = "ssk"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+ssh-key = { version = "0.6.7", features = ["ed25519"] }
