@@ -4,6 +4,7 @@ use tabled::settings::Style;
 use tabled::{Table, Tabled};
 
 use crate::identity::store::{self, Entry};
+use crate::json::{self, IdentityJson};
 use crate::settings::Settings;
 use crate::ssh::agent::{self, AgentStatus};
 use crate::state::State;
@@ -50,52 +51,75 @@ fn blank(name: &str, comment: &str, flags: &str) -> Row {
     }
 }
 
-/// Managed identities (known to ssk.toml) first, then unmanaged, each group by name.
-pub fn build_rows(entries: &[Entry], state: &State, agent: &AgentStatus) -> Vec<Row> {
-    let mut rows: Vec<(bool, Row)> = Vec::new();
-    for entry in entries {
-        match entry {
-            Entry::Identity(id) => {
-                let hosts = state.deployments(&id.name).len();
-                let row = Row {
-                    name: id.name.clone(),
-                    kind: id.type_label(),
-                    fingerprint: abbreviate_fingerprint(&id.fingerprint),
-                    pass: if id.encrypted { "yes" } else { "no" }.to_string(),
-                    agent: match agent::contains(agent, &id.fingerprint) {
-                        Some(true) => "yes",
-                        Some(false) => "-",
-                        None => "n/a",
-                    }
-                    .to_string(),
-                    hosts: if hosts == 0 {
-                        "-".to_string()
-                    } else {
-                        hosts.to_string()
-                    },
-                    comment: id.comment.clone(),
-                    flags: if id.public_path.is_none() {
-                        "⚠ no .pub".to_string()
-                    } else {
-                        String::new()
-                    },
-                };
-                rows.push((state.is_managed(&id.name), row));
-            }
-            Entry::Broken { name, .. } => rows.push((false, blank(name, "", "⚠ unreadable"))),
-            Entry::OrphanPublic { name, .. } => {
-                rows.push((false, blank(name, "(no private key)", "⚠")))
+fn entry_name(e: &Entry) -> &str {
+    match e {
+        Entry::Identity(id) => &id.name,
+        Entry::Broken { name, .. } | Entry::OrphanPublic { name, .. } => name,
+    }
+}
+
+/// Managed identities (known to ssk.toml) first, then everything else; each group by name.
+pub fn order<'a>(entries: &'a [Entry], state: &State) -> Vec<&'a Entry> {
+    let mut out: Vec<&Entry> = entries.iter().collect();
+    out.sort_by_key(|e| {
+        let managed = matches!(e, Entry::Identity(id) if state.is_managed(&id.name));
+        (!managed, entry_name(e).to_string())
+    });
+    out
+}
+
+fn row_for(entry: &Entry, state: &State, agent: &AgentStatus) -> Row {
+    match entry {
+        Entry::Identity(id) => {
+            let hosts = state.deployments(&id.name).len();
+            Row {
+                name: id.name.clone(),
+                kind: id.type_label(),
+                fingerprint: abbreviate_fingerprint(&id.fingerprint),
+                pass: if id.encrypted { "yes" } else { "no" }.to_string(),
+                agent: match agent::contains(agent, &id.fingerprint) {
+                    Some(true) => "yes",
+                    Some(false) => "-",
+                    None => "n/a",
+                }
+                .to_string(),
+                hosts: if hosts == 0 {
+                    "-".to_string()
+                } else {
+                    hosts.to_string()
+                },
+                comment: id.comment.clone(),
+                flags: if id.public_path.is_none() {
+                    "⚠ no .pub".to_string()
+                } else {
+                    String::new()
+                },
             }
         }
+        Entry::Broken { name, .. } => blank(name, "", "⚠ unreadable"),
+        Entry::OrphanPublic { name, .. } => blank(name, "(no private key)", "⚠"),
     }
-    rows.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.name.cmp(&b.1.name)));
-    rows.into_iter().map(|(_, row)| row).collect()
+}
+
+pub fn build_rows(entries: &[Entry], state: &State, agent: &AgentStatus) -> Vec<Row> {
+    order(entries, state)
+        .into_iter()
+        .map(|e| row_for(e, state, agent))
+        .collect()
 }
 
 pub fn run(settings: &Settings, ui: &Ui) -> anyhow::Result<u8> {
     let entries = store::scan(&settings.ssh_dir)?;
     let state = State::load(&settings.ssh_dir)?;
     let agent = agent::status();
+    if settings.json {
+        let items: Vec<IdentityJson> = order(&entries, &state)
+            .into_iter()
+            .map(|e| IdentityJson::from_entry(e, &state, &agent))
+            .collect();
+        json::print(&items)?;
+        return Ok(0);
+    }
     let rows = build_rows(&entries, &state, &agent);
     if rows.is_empty() {
         ui.info(format!(

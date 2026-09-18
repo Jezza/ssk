@@ -7,6 +7,7 @@ use crate::cli::ShowArgs;
 use crate::fsx;
 use crate::identity::Identity;
 use crate::identity::store;
+use crate::json::{self, IdentityFields, ShowJson};
 use crate::settings::Settings;
 use crate::ssh::agent::{self, AgentStatus};
 use crate::state::{Deployment, State};
@@ -14,6 +15,12 @@ use crate::ui::Ui;
 
 pub fn run(settings: &Settings, ui: &Ui, args: &ShowArgs) -> anyhow::Result<u8> {
     let id = store::resolve(&settings.ssh_dir, &args.identity)?;
+    if settings.json {
+        let state = State::load(&settings.ssh_dir)?;
+        let agent = agent::status();
+        json::print(&render_json(&id, &state, &agent, &settings.ssh_dir)?)?;
+        return Ok(0);
+    }
     if args.pub_only {
         println!("{}", id.public_key_line()?);
         return Ok(0);
@@ -110,6 +117,30 @@ pub fn render(
         writeln!(s, "{line}")?;
     }
     Ok(s)
+}
+
+pub fn render_json(
+    id: &Identity,
+    state: &State,
+    agent: &AgentStatus,
+    ssh_dir: &Path,
+) -> anyhow::Result<ShowJson> {
+    let conf = ssh_dir.join("ssk.d").join(format!("{}.conf", id.name));
+    Ok(ShowJson {
+        status: json::status_of(id),
+        identity: IdentityFields::new(id, state, agent),
+        private_mode: format!("{:04o}", fsx::mode_of(&id.private_path)?),
+        public_mode: id
+            .public_path
+            .as_ref()
+            .map(|p| fsx::mode_of(p))
+            .transpose()?
+            .map(|m| format!("{m:04o}")),
+        created: state.identity.get(&id.name).and_then(|x| x.created.clone()),
+        deployments: state.deployments(&id.name).to_vec(),
+        ssh_config: conf.is_file().then_some(conf),
+        public_key: id.public_key_line().ok(),
+    })
 }
 
 fn endpoint(d: &Deployment) -> String {

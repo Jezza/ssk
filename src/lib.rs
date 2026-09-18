@@ -8,6 +8,7 @@ pub mod commands;
 pub mod config_file;
 pub mod fsx;
 pub mod identity;
+pub mod json;
 pub mod settings;
 pub mod ssh;
 pub mod state;

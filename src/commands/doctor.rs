@@ -12,6 +12,7 @@ use crate::cli::DoctorArgs;
 use crate::fsx;
 use crate::identity::IdentityError;
 use crate::identity::store::{self, Entry};
+use crate::json::{self, DoctorJson, FindingJson};
 use crate::settings::Settings;
 use crate::ssh::config;
 use crate::state::State;
@@ -297,13 +298,20 @@ pub fn apply(ssh_dir: &Path, findings: &[Finding], ui: &Ui) -> anyhow::Result<us
     Ok(applied)
 }
 
-pub fn run(settings: &Settings, ui: &Ui, args: &DoctorArgs) -> anyhow::Result<u8> {
-    let findings = check(&settings.ssh_dir)?;
-    if findings.is_empty() {
-        ui.success(format!("{} looks healthy", settings.ssh_dir.display()));
-        return Ok(0);
+fn code_for(findings: &[Finding]) -> u8 {
+    if findings.iter().any(|f| f.severity == Severity::Warn) {
+        1
+    } else {
+        0
     }
-    for f in &findings {
+}
+
+fn print_findings(ui: &Ui, ssh_dir: &Path, findings: &[Finding]) {
+    if findings.is_empty() {
+        ui.success(format!("{} looks healthy", ssh_dir.display()));
+        return;
+    }
+    for f in findings {
         let tag = match f.severity {
             Severity::Warn => "warn",
             Severity::Info => "info",
@@ -316,31 +324,54 @@ pub fn run(settings: &Settings, ui: &Ui, args: &DoctorArgs) -> anyhow::Result<u8
             f.message
         ));
     }
-    let any_warn = |fs: &[Finding]| fs.iter().any(|f| f.severity == Severity::Warn);
+}
 
-    if !args.fix {
-        if findings.iter().any(|f| f.fix.is_some()) {
-            ui.hint("ssk doctor --fix   (applies the fixable ones; only tightens, never deletes)");
-        }
-        return Ok(if any_warn(&findings) { 1 } else { 0 });
-    }
-    if settings.dry_run {
-        ui.info("dry run: no fixes applied");
-        return Ok(if any_warn(&findings) { 1 } else { 0 });
-    }
+pub fn run(settings: &Settings, ui: &Ui, args: &DoctorArgs) -> anyhow::Result<u8> {
+    let dir = &settings.ssh_dir;
+    let findings = check(dir)?;
     let fixable: Vec<Finding> = findings
         .iter()
         .filter(|f| f.fix.is_some())
         .cloned()
         .collect();
+    if !settings.json {
+        print_findings(ui, dir, &findings);
+    }
+    let mut applied = 0;
+    let mut code = code_for(&findings);
+    if args.fix && !settings.dry_run && !fixable.is_empty() {
+        applied = apply(dir, &fixable, ui)?;
+        code = code_for(&check(dir)?);
+    }
+    if settings.json {
+        json::print(&DoctorJson {
+            findings: findings.iter().map(FindingJson::from).collect(),
+            applied,
+        })?;
+        return Ok(code);
+    }
+    if findings.is_empty() {
+        return Ok(0);
+    }
+    if !args.fix {
+        if !fixable.is_empty() {
+            ui.hint("ssk doctor --fix   (applies the fixable ones; only tightens, never deletes)");
+        }
+        return Ok(code);
+    }
+    if settings.dry_run {
+        ui.info("dry run: no fixes applied");
+        return Ok(code);
+    }
     if fixable.is_empty() {
         ui.info("nothing here is auto-fixable");
-        return Ok(if any_warn(&findings) { 1 } else { 0 });
+        return Ok(code);
     }
-    let n = apply(&settings.ssh_dir, &fixable, ui)?;
-    ui.success(format!("applied {n} fix{}", if n == 1 { "" } else { "es" }));
-    let remaining = check(&settings.ssh_dir)?;
-    Ok(if any_warn(&remaining) { 1 } else { 0 })
+    ui.success(format!(
+        "applied {applied} fix{}",
+        if applied == 1 { "" } else { "es" }
+    ));
+    Ok(code)
 }
 
 #[cfg(test)]
