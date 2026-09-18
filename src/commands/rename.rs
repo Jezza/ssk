@@ -2,6 +2,7 @@
 //! own ~/.ssh/config is never edited, only reported.
 
 use std::fs;
+use std::path::Path;
 
 use anyhow::{Context, bail};
 
@@ -31,6 +32,14 @@ pub fn run(settings: &Settings, ui: &Ui, args: &RenameArgs) -> anyhow::Result<u8
         );
     }
     let mut st = State::load(dir)?;
+    // The files may be gone while the entry survives (someone deleted them by hand);
+    // renaming onto that entry would silently replace it and lose the deployments.
+    if st.is_managed(new) {
+        bail!(
+            "identity '{new}' still has an entry in {}; run `ssk rm {new}` first",
+            State::path(dir).display()
+        );
+    }
     let had_conf = config::conf_path(dir, old).is_file();
     let mentions = config::user_config_mentions(dir, old)?;
 
@@ -61,6 +70,7 @@ pub fn run(settings: &Settings, ui: &Ui, args: &RenameArgs) -> anyhow::Result<u8
     }
     if settings.dry_run {
         ui.info("dry run: nothing renamed");
+        warn_about_user_config(ui, dir, old, &mentions);
         return Ok(0);
     }
 
@@ -90,17 +100,24 @@ pub fn run(settings: &Settings, ui: &Ui, args: &RenameArgs) -> anyhow::Result<u8
         config::sync_conf(dir, new, st.deployments(new))?;
     }
     ui.success(format!("renamed identity {old} -> {new}"));
-    if !mentions.is_empty() {
-        let lines: Vec<String> = mentions.iter().map(|(n, _)| n.to_string()).collect();
-        ui.warn(format!(
-            "{} still mentions '{old}' on line{} {}; ssk never edits that file, so update it yourself:",
-            dir.join("config").display(),
-            if lines.len() == 1 { "" } else { "s" },
-            lines.join(", ")
-        ));
-        for (n, line) in &mentions {
-            ui.warn(format!("  {n}: {}", line.trim()));
-        }
-    }
+    warn_about_user_config(ui, dir, old, &mentions);
     Ok(0)
+}
+
+/// The user's own `config` is never edited, only reported — in `--dry-run` too, where it
+/// is part of knowing what the rename will leave behind.
+fn warn_about_user_config(ui: &Ui, dir: &Path, old: &str, mentions: &[(usize, String)]) {
+    if mentions.is_empty() {
+        return;
+    }
+    let lines: Vec<String> = mentions.iter().map(|(n, _)| n.to_string()).collect();
+    ui.warn(format!(
+        "{} still mentions '{old}' on line{} {}; ssk never edits that file, so update it yourself:",
+        dir.join("config").display(),
+        if lines.len() == 1 { "" } else { "s" },
+        lines.join(", ")
+    ));
+    for (n, line) in mentions {
+        ui.warn(format!("  {n}: {}", line.trim()));
+    }
 }

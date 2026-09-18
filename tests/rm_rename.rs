@@ -209,6 +209,30 @@ fn rename_refuses_to_clobber_and_needs_a_source() {
     assert!(w.dir.join("work").exists() && w.dir.join("github").exists());
 }
 
+/// The files of NEW can be gone while its ssk.toml entry survives; renaming onto that
+/// entry would replace it, losing the deployments it still records.
+#[test]
+fn rename_refuses_when_the_new_name_still_has_a_state_entry() {
+    let w = world();
+    cmd(&w)
+        .args(["new", "job", "--no-passphrase"])
+        .assert()
+        .success();
+    fs::remove_file(w.dir.join("job")).unwrap();
+    fs::remove_file(w.dir.join("job.pub")).unwrap();
+    assert!(state(&w).contains("[identity.job]"));
+
+    cmd(&w)
+        .args(["rename", "work", "job"])
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains("still has an entry in"))
+        .stderr(predicate::str::contains("ssk rm job"));
+    assert!(w.dir.join("work").exists() && w.dir.join("work.pub").exists());
+    assert!(!w.dir.join("job").exists());
+    assert!(state(&w).contains("[identity.work]"), "{}", state(&w));
+}
+
 #[test]
 fn rename_works_on_a_legacy_pem_key_without_a_pub() {
     let w = world();
@@ -235,6 +259,11 @@ fn rename_warns_about_the_users_own_config() {
         ),
     )
     .unwrap();
+    cmd(&w)
+        .args(["--dry-run", "rename", "work", "job"])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("still mentions 'work'"));
     cmd(&w)
         .args(["rename", "work", "job"])
         .assert()
