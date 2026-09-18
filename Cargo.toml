@@ -2,6 +2,33 @@
 name = "ssk"
 version = "0.1.0"
 edition = "2024"
+license = "MIT AND BSD-2-Clause"
+description = "High-level SSH identity manager: generate keys, install them on hosts, keep track of both"
 
 [dependencies]
-ssh-key = { version = "0.6.7", features = ["ed25519"] }
+anyhow = "1"
+clap = { version = "4.6", features = ["derive", "env"] }
+clap_complete = "4.6"
+dialoguer = "0.12"
+directories = "6"
+gethostname = "1"
+jiff = "0.2"
+owo-colors = { version = "4", features = ["supports-colors"] }
+serde = { version = "1", features = ["derive"] }
+ssh-key = { version = "0.6.7", features = ["ed25519", "rsa", "p256", "p384", "p521", "encryption", "getrandom"] }
+strsim = "0.11"
+tabled = "0.22"
+tempfile = "3"
+thiserror = "2"
+toml = "1"
+which = "8"
+zeroize = "1"
+
+[dev-dependencies]
+assert_cmd = "2"
+predicates = "3"
+
+# Dependencies compiled optimised even in dev/test: RSA keygen and bcrypt-pbkdf
+# are unusably slow at opt-level 0.
+[profile.dev.package."*"]
+opt-level = 2
