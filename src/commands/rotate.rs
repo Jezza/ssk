@@ -50,6 +50,9 @@ pub fn install_everywhere(
     let opts = CopyOptions {
         ssh_options: ssh_options.to_vec(),
         auth_key: Some(old.private_path.clone()),
+        // The install snippet is idempotent, so always run it: the probe then only has to
+        // answer "does the new key work now", never "may I skip the install".
+        force: true,
         ..Default::default()
     };
     let mut out = Vec::new();
@@ -437,7 +440,7 @@ mod tests {
     use super::*;
     use crate::identity::keygen::{KeySpec, KeyType, generate, write_pair};
     use crate::ssh::runner::SshOutput;
-    use crate::ssh::runner::fake::{FakeSsh, denied, ok, unreachable};
+    use crate::ssh::runner::fake::{FakeSsh, accepts, denied, ok, unreachable};
 
     fn make(dir: &Path, name: &str) -> Identity {
         let key = generate(
@@ -477,36 +480,55 @@ mod tests {
     #[test]
     fn install_everywhere_probes_with_new_and_authenticates_with_old() {
         let (_tmp, old, new) = fixture();
-        let ssh = FakeSsh::new(vec![denied(), ok(), ok(), ok()]);
+        // Forced, so every host is probe -> install -> verify: three calls each.
+        let ssh = FakeSsh::new(vec![
+            denied(),
+            ok(),
+            accepts(&new.private_path),
+            accepts(&new.private_path),
+            ok(),
+            accepts(&new.private_path),
+        ]);
         let out = install_everywhere(&ssh, &Ui::silent(), &old, &new, &[dep("a"), dep("b")], &[])
             .unwrap();
         assert_eq!(out[0].1, copy::Outcome::Installed);
-        assert_eq!(out[1].1, copy::Outcome::AlreadyInstalled);
+        assert_eq!(out[1].1, copy::Outcome::Installed);
         let calls = ssh.calls();
-        assert_eq!(calls.len(), 4);
+        assert_eq!(calls.len(), 6);
         let new_p = new.private_path.display().to_string();
         let old_p = old.private_path.display().to_string();
-        assert!(has(&calls[0].args, "-i", &new_p), "probe uses the new key");
-        assert!(
-            has(&calls[1].args, "-i", &old_p),
-            "install authenticates with the old key"
-        );
-        assert!(!calls[1].args.iter().any(|a| a.contains("IdentitiesOnly")));
-        assert_eq!(
-            calls[1].stdin.as_deref(),
-            Some(format!("{}\n", new.public_key_line().unwrap()).as_str())
-        );
-        assert!(has(&calls[3].args, "-i", &new_p));
+        for probe in [0, 2, 3, 5] {
+            assert!(
+                has(&calls[probe].args, "-i", &new_p),
+                "call {probe} probes with the new key"
+            );
+        }
+        for install in [1, 4] {
+            assert!(
+                has(&calls[install].args, "-i", &old_p),
+                "call {install} authenticates with the old key"
+            );
+            assert!(
+                !calls[install]
+                    .args
+                    .iter()
+                    .any(|a| a.contains("IdentitiesOnly"))
+            );
+            assert_eq!(
+                calls[install].stdin.as_deref(),
+                Some(format!("{}\n", new.public_key_line().unwrap()).as_str())
+            );
+        }
     }
 
     #[test]
     fn install_everywhere_keeps_going_after_a_failure() {
         let (_tmp, old, new) = fixture();
-        let ssh = FakeSsh::new(vec![unreachable(), ok()]);
+        let ssh = FakeSsh::new(vec![unreachable(), ok(), ok(), accepts(&new.private_path)]);
         let out = install_everywhere(&ssh, &Ui::silent(), &old, &new, &[dep("a"), dep("b")], &[])
             .unwrap();
         assert!(matches!(out[0].1, copy::Outcome::Unreachable(_)));
-        assert_eq!(out[1].1, copy::Outcome::AlreadyInstalled);
+        assert_eq!(out[1].1, copy::Outcome::Installed);
     }
 
     #[test]

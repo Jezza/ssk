@@ -123,8 +123,10 @@ fn rotate_stops_before_revoking_when_a_host_is_down_then_resumes() {
         .assert()
         .success()
         .stdout(predicate::str::contains("reuse the existing work.new"))
+        // the install step is forced, so a.test is installed again (idempotently) rather
+        // than skipped on the probe's say-so
         .stdout(predicate::str::contains(
-            "a.test: new key already installed",
+            "a.test: new key installed and verified",
         ));
     assert_eq!(blob(&w, "work"), staged);
     for host in ["a.test", "b.test"] {

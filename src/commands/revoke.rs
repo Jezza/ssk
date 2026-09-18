@@ -217,7 +217,13 @@ pub fn revoke_one(
     };
     ui.info(format!("{target}: verifying"));
     Ok(
-        match probe::probe(runner, &identity.private_path, target, ssh_options)? {
+        match probe::probe(
+            runner,
+            &identity.private_path,
+            &identity.fingerprint,
+            target,
+            ssh_options,
+        )? {
             ProbeResult::NotInstalled if removed => Outcome::Revoked,
             ProbeResult::NotInstalled => Outcome::NotPresent,
             ProbeResult::Installed => Outcome::StillAccepted,
@@ -278,7 +284,7 @@ mod tests {
     use super::*;
     use crate::identity::keygen::{KeySpec, KeyType, generate, write_pair};
     use crate::ssh::runner::SshOutput;
-    use crate::ssh::runner::fake::{FakeSsh, denied, ok, unreachable};
+    use crate::ssh::runner::fake::{FakeSsh, accepts, denied, ok, unreachable};
     use crate::state::Deployment;
 
     fn fixture() -> (tempfile::TempDir, Identity) {
@@ -324,6 +330,16 @@ mod tests {
         assert!(calls[1].capture && calls[1].args.last().map(String::as_str) == Some("exit"));
     }
 
+    /// The verify probe got in, but on another key (an ssk.d conf for a different
+    /// identity, say): the key we removed is gone all the same.
+    #[test]
+    fn a_foreign_key_authenticating_after_removal_is_still_revoked() {
+        let (_tmp, id) = fixture();
+        let ssh = FakeSsh::new(vec![ok(), ok()]);
+        let out = revoke_one(&ssh, &Ui::silent(), &id, &id.private_path, &t(), &[], "k").unwrap();
+        assert_eq!(out, Outcome::Revoked);
+    }
+
     #[test]
     fn other_results() {
         let (_tmp, id) = fixture();
@@ -332,8 +348,14 @@ mod tests {
             revoke_one(&ssh, &Ui::silent(), &id, &id.private_path, &t(), &[], "k").unwrap()
         };
         assert_eq!(run(vec![not_present(), denied()]), Outcome::NotPresent);
-        assert_eq!(run(vec![ok(), ok()]), Outcome::StillAccepted);
-        assert_eq!(run(vec![not_present(), ok()]), Outcome::StillAccepted);
+        assert_eq!(
+            run(vec![ok(), accepts(&id.private_path)]),
+            Outcome::StillAccepted
+        );
+        assert_eq!(
+            run(vec![not_present(), accepts(&id.private_path)]),
+            Outcome::StillAccepted
+        );
         assert!(matches!(
             run(vec![ok(), unreachable()]),
             Outcome::RevokedUnverified(_)
@@ -448,7 +470,7 @@ mod tests {
             },
         );
         st.save(tmp.path()).unwrap();
-        let ssh = FakeSsh::new(vec![ok(), ok()]);
+        let ssh = FakeSsh::new(vec![ok(), accepts(&id.private_path)]);
         let code = run_targets(
             &settings,
             &Ui::silent(),

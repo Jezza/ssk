@@ -135,6 +135,40 @@ fn revoke_from_one_host_keeps_the_others_config() {
     assert!(authorized_keys(&w, "b.test").contains(&blob(&w, "work")));
 }
 
+/// Two ssk identities on one host: revoking one must not disturb the other, and the
+/// verify probe must not mistake the other identity's key for the one being revoked.
+#[test]
+fn revoke_leaves_another_identity_on_the_same_host_alone() {
+    let w = world();
+    cmd(&w)
+        .args(["new", "github", "--no-passphrase"])
+        .assert()
+        .success();
+    for id in ["work", "github"] {
+        cmd(&w).args(["copy", id, "a.test"]).assert().success();
+    }
+    let github_conf = fs::read_to_string(w.dir.join("ssk.d/github.conf")).unwrap();
+
+    cmd(&w)
+        .args(["revoke", "work", "a.test"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("revoked and verified"));
+
+    let ak = authorized_keys(&w, "a.test");
+    assert!(!ak.contains(&blob(&w, "work")), "{ak}");
+    assert!(
+        ak.contains(&blob(&w, "github")),
+        "github's key is gone:\n{ak}"
+    );
+    assert_eq!(
+        fs::read_to_string(w.dir.join("ssk.d/github.conf")).unwrap(),
+        github_conf,
+        "github's generated config must be untouched"
+    );
+    assert!(!w.dir.join("ssk.d/work.conf").exists());
+}
+
 #[test]
 fn revoke_unreachable_host_keeps_the_record() {
     let w = world();

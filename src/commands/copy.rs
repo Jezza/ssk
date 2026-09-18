@@ -205,7 +205,13 @@ pub fn copy_one(
         "{target}: checking whether '{}' already works",
         identity.name
     ));
-    match probe::probe(runner, &identity.private_path, target, &opts.ssh_options)? {
+    match probe::probe(
+        runner,
+        &identity.private_path,
+        &identity.fingerprint,
+        target,
+        &opts.ssh_options,
+    )? {
         probe::ProbeResult::Installed if !opts.force => return Ok(Outcome::AlreadyInstalled),
         probe::ProbeResult::Installed | probe::ProbeResult::NotInstalled => {}
         probe::ProbeResult::Error(msg) => return Ok(Outcome::Unreachable(msg)),
@@ -230,7 +236,13 @@ pub fn copy_one(
 
     ui.info(format!("{target}: verifying"));
     Ok(
-        match probe::probe(runner, &identity.private_path, target, &opts.ssh_options)? {
+        match probe::probe(
+            runner,
+            &identity.private_path,
+            &identity.fingerprint,
+            target,
+            &opts.ssh_options,
+        )? {
             probe::ProbeResult::Installed => Outcome::Installed,
             probe::ProbeResult::NotInstalled => Outcome::InstalledUnverified,
             probe::ProbeResult::Error(msg) => {
@@ -293,7 +305,7 @@ mod tests {
     use super::*;
     use crate::identity::keygen::{KeySpec, KeyType, generate, write_pair};
     use crate::ssh::runner::SshOutput;
-    use crate::ssh::runner::fake::{FakeSsh, denied, ok, unreachable};
+    use crate::ssh::runner::fake::{FakeSsh, accepts, denied, ok, unreachable};
 
     fn fixture() -> (tempfile::TempDir, Identity) {
         let tmp = tempfile::tempdir().unwrap();
@@ -322,7 +334,7 @@ mod tests {
     #[test]
     fn already_installed_makes_one_call() {
         let (_tmp, id) = fixture();
-        let ssh = FakeSsh::new(vec![ok()]);
+        let ssh = FakeSsh::new(vec![accepts(&id.private_path)]);
         let out = copy_one(
             &ssh,
             &Ui::silent(),
@@ -336,10 +348,21 @@ mod tests {
         assert_eq!(ssh.calls().len(), 1);
     }
 
+    /// ssh got in, but on some other key (a config `IdentityFile` line, ssk's own
+    /// ssk.d conf for another identity): our key is not there, so install it.
+    #[test]
+    fn another_key_authenticating_is_not_already_installed() {
+        let (_tmp, id) = fixture();
+        let ssh = FakeSsh::new(vec![ok(), ok(), accepts(&id.private_path)]);
+        let out = copy_one(&ssh, &Ui::silent(), &id, &t(), &CopyOptions::default(), "k").unwrap();
+        assert_eq!(out, Outcome::Installed);
+        assert_eq!(ssh.calls().len(), 3, "probe, install, verify");
+    }
+
     #[test]
     fn install_then_verify() {
         let (_tmp, id) = fixture();
-        let ssh = FakeSsh::new(vec![denied(), ok(), ok()]);
+        let ssh = FakeSsh::new(vec![denied(), ok(), accepts(&id.private_path)]);
         let out = copy_one(
             &ssh,
             &Ui::silent(),
@@ -384,7 +407,11 @@ mod tests {
     #[test]
     fn force_reinstalls_even_when_already_working() {
         let (_tmp, id) = fixture();
-        let ssh = FakeSsh::new(vec![ok(), ok(), ok()]);
+        let ssh = FakeSsh::new(vec![
+            accepts(&id.private_path),
+            ok(),
+            accepts(&id.private_path),
+        ]);
         let opts = CopyOptions {
             force: true,
             ..Default::default()
@@ -414,7 +441,12 @@ mod tests {
     fn run_targets_records_state_writes_config_and_sets_exit_code() {
         let (tmp, id) = fixture();
         let settings = Settings::for_dir(tmp.path());
-        let ssh = FakeSsh::new(vec![denied(), ok(), ok(), unreachable()]);
+        let ssh = FakeSsh::new(vec![
+            denied(),
+            ok(),
+            accepts(&id.private_path),
+            unreachable(),
+        ]);
         let targets = vec![
             t(),
             Target {
@@ -463,7 +495,7 @@ mod tests {
     fn alias_is_used_when_given() {
         let (tmp, id) = fixture();
         let settings = Settings::for_dir(tmp.path());
-        let ssh = FakeSsh::new(vec![ok()]);
+        let ssh = FakeSsh::new(vec![accepts(&id.private_path)]);
         let opts = CopyOptions {
             alias: Some("prod1".into()),
             ..Default::default()
@@ -488,7 +520,7 @@ mod tests {
     fn no_config_skips_ssh_config_but_records_state() {
         let (tmp, id) = fixture();
         let settings = Settings::for_dir(tmp.path());
-        let ssh = FakeSsh::new(vec![denied(), ok(), ok()]);
+        let ssh = FakeSsh::new(vec![denied(), ok(), accepts(&id.private_path)]);
         let opts = CopyOptions {
             write_config: false,
             ..Default::default()

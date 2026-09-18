@@ -24,7 +24,8 @@ use std::path::PathBuf;
 /// a fake home at `$FAKE_SSH_DIR/home-<host>` and the remote command (ssk's install or
 /// revoke snippet, `exec sh -c '...'`) really runs there under `sh`, with stdin also
 /// copied to `stdin.log`. A probe (last argument `exit`) succeeds when that home's
-/// authorized_keys carries the blob from the `-i` key's `.pub`.
+/// authorized_keys carries the blob from the `-i` key's `.pub`, and then prints the
+/// `Server accepts key:` debug line ssk's probe insists on.
 /// `FAKE_SSH_FAIL_HOST=<host>` refuses every connection to that host;
 /// `FAKE_SSH_FAIL_REVOKE=1` makes the revoke snippet fail with exit 1.
 pub fn fake_ssh(dir: &Path) -> PathBuf {
@@ -47,6 +48,7 @@ HOME="$FAKE_SSH_DIR/home-$host"; export HOME; mkdir -p "$HOME"
 if [ "$last" = "exit" ]; then
   blob=$(awk '{print $2}' "$key.pub")
   if [ -f "$HOME/.ssh/authorized_keys" ] && grep -qF -- " $blob" "$HOME/.ssh/authorized_keys"; then
+    echo "debug1: Server accepts key: $key ED25519 SHA256:fake explicit" >&2
     exit 0
   fi
   echo "deploy@$host: Permission denied (publickey)." >&2

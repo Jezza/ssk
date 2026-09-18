@@ -140,10 +140,24 @@ pub mod fake {
         }
     }
 
+    /// Exit 0 with nothing on stderr: ssh got in, but not on the key we probed with
+    /// (see `probe::classify`).
     pub fn ok() -> SshOutput {
         SshOutput {
             code: Some(0),
             ..Default::default()
+        }
+    }
+
+    /// Exit 0 *and* ssh naming `key_path` as the key the server accepted.
+    pub fn accepts(key_path: &Path) -> SshOutput {
+        SshOutput {
+            code: Some(0),
+            stdout: String::new(),
+            stderr: format!(
+                "debug1: Server accepts key: {} ED25519 SHA256:fake explicit\n",
+                key_path.display()
+            ),
         }
     }
 
