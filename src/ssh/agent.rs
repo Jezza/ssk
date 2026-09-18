@@ -1,7 +1,7 @@
 //! ssh-agent, via the `ssh-add` binary. Absence of an agent is a normal state, not an error.
 
 use std::ffi::OsStr;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::ensure;
@@ -26,6 +26,14 @@ pub fn parse_list(stdout: &str) -> Vec<String> {
         .collect()
 }
 
+/// `SSK_SSH_ADD_BIN` if set (tests), else `ssh-add` from PATH.
+pub fn program() -> PathBuf {
+    std::env::var_os("SSK_SSH_ADD_BIN")
+        .filter(|p| !p.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("ssh-add"))
+}
+
 pub fn status() -> AgentStatus {
     status_with(std::env::var_os("SSH_AUTH_SOCK").as_deref())
 }
@@ -34,7 +42,7 @@ pub fn status_with(auth_sock: Option<&OsStr>) -> AgentStatus {
     if auth_sock.is_none_or(|s| s.is_empty()) {
         return AgentStatus::Unavailable;
     }
-    match Command::new("ssh-add").arg("-l").output() {
+    match Command::new(program()).arg("-l").output() {
         Ok(out) if out.status.success() => {
             AgentStatus::Loaded(parse_list(&String::from_utf8_lossy(&out.stdout)))
         }
@@ -56,8 +64,20 @@ pub fn contains(status: &AgentStatus, fingerprint: &str) -> Option<bool> {
 pub fn add(private_key: &Path, ui: &Ui) -> anyhow::Result<()> {
     let shown = private_key.display().to_string();
     ui.command("ssh-add", std::slice::from_ref(&shown));
-    let status = Command::new("ssh-add").arg(private_key).status()?;
+    let status = Command::new(program()).arg(private_key).status()?;
     ensure!(status.success(), "ssh-add exited with {status}");
+    Ok(())
+}
+
+/// `ssh-add -d <key>`. ssh-add reads `<key>.pub` to know which key to drop.
+pub fn delete(private_key: &Path, ui: &Ui) -> anyhow::Result<()> {
+    let shown = private_key.display().to_string();
+    ui.command("ssh-add", &["-d".to_string(), shown]);
+    let status = Command::new(program())
+        .arg("-d")
+        .arg(private_key)
+        .status()?;
+    ensure!(status.success(), "ssh-add -d exited with {status}");
     Ok(())
 }
 

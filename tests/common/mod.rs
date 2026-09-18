@@ -57,3 +57,28 @@ pub fn unreachable_ssh(dir: &Path) -> PathBuf {
     fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
     script
 }
+
+/// A stand-in `ssh-add`. Every argv is appended to `$FAKE_AGENT_DIR/ssh-add.log`.
+/// `-l` prints `$FAKE_AGENT_DIR/loaded` when that file is non-empty, otherwise the real
+/// "no identities" message with exit 1. Adding fails when `FAKE_SSH_ADD_FAIL` is set.
+pub fn fake_ssh_add(dir: &Path) -> PathBuf {
+    let script = dir.join("fake-ssh-add");
+    fs::write(
+        &script,
+        r#"#!/bin/sh
+printf '%s\n' "$*" >> "$FAKE_AGENT_DIR/ssh-add.log"
+case "$1" in
+  -l)
+    if [ -s "$FAKE_AGENT_DIR/loaded" ]; then cat "$FAKE_AGENT_DIR/loaded"; exit 0; fi
+    echo "The agent has no identities."; exit 1;;
+  -d) exit 0;;
+  *)
+    if [ -n "$FAKE_SSH_ADD_FAIL" ]; then echo "Could not add identity" >&2; exit 1; fi
+    exit 0;;
+esac
+"#,
+    )
+    .unwrap();
+    fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
+    script
+}
