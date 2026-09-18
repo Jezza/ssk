@@ -7,6 +7,11 @@ OpenSSH 10.3p1 (Debian package `openssh-client`). One line was changed:
 the unconditional `cat >> "${AUTH_KEY_FILE}"` became a read-one-line,
 `grep -qxF`-then-append so that re-running never duplicates a key.
 
+`src/ssh/revoke_snippet.sh` is ssk's own work (MIT) except for the three
+`AUTH_KEY_FILE` selection lines (default path, OpenWrt/dropbear, Haiku), which
+are copied from the same `ssh-copy-id` source so that install and revoke always
+touch the same file. The notice below covers those lines too.
+
 Licensed under the BSD 2-Clause licence:
 
 ```

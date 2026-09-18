@@ -4,6 +4,7 @@ pub mod agent;
 pub mod config;
 pub mod install;
 pub mod probe;
+pub mod revoke;
 pub mod runner;
 
 use crate::target::Target;
