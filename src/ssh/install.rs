@@ -5,7 +5,7 @@ use std::io;
 use std::path::Path;
 
 use super::runner::{SshInvocation, SshOutput, SshRunner};
-use super::target_args;
+use super::{identities_only, target_args};
 use crate::target::Target;
 
 /// The snippet as vendored, comments included. See `install_snippet.sh` for provenance.
@@ -27,9 +27,10 @@ pub fn remote_command() -> String {
     format!("exec sh -c '{}'", squash(SNIPPET_SOURCE))
 }
 
-/// ssh argv for the install step. No `IdentitiesOnly`: any auth that works (agent key,
-/// password, another key) is fine for getting the new key on. `auth_key` adds one `-i`
-/// to try first; `rotate` passes the current key.
+/// ssh argv for the install step. Any auth that works (a config key, a default key, a
+/// password) is fine for getting the new key on; `IdentitiesOnly=yes` only stops ssh
+/// burning `MaxAuthTries` on agent keys first (see [`identities_only`]). `auth_key` adds
+/// one `-i` to try first; `rotate` passes the current key.
 pub fn invocation(
     target: &Target,
     extra_options: &[String],
@@ -42,6 +43,7 @@ pub fn invocation(
         args.push(k.display().to_string());
     }
     args.extend(target_args(target, extra_options));
+    args.extend(identities_only());
     args.push("--".to_string());
     args.push(target.host.clone());
     args.push(remote_command());
@@ -130,6 +132,8 @@ mod tests {
             "u",
             "-o",
             "ProxyJump=b",
+            "-o",
+            "IdentitiesOnly=yes",
             "--",
             "h",
         ]
@@ -168,7 +172,7 @@ mod tests {
     }
 
     #[test]
-    fn auth_key_adds_a_single_i_without_identities_only() {
+    fn auth_key_adds_a_single_i_and_keeps_identities_only() {
         let t = Target {
             user: None,
             host: "h".into(),
@@ -176,7 +180,25 @@ mod tests {
         };
         let inv = invocation(&t, &[], "k", Some(Path::new("/k/old")));
         assert_eq!(&inv.args[..4], &["-o", "ControlPath=none", "-i", "/k/old"]);
-        assert!(!inv.args.iter().any(|a| a.contains("IdentitiesOnly")));
+        assert!(inv.args.iter().any(|a| a == "IdentitiesOnly=yes"));
+    }
+
+    /// ssh keeps the first value it sees for an option, so ours must come after the user's.
+    #[test]
+    fn a_user_identities_only_option_outranks_ours() {
+        let t = Target {
+            user: None,
+            host: "h".into(),
+            port: None,
+        };
+        let inv = invocation(&t, &["IdentitiesOnly=no".to_string()], "k", None);
+        let at = |v: &str| {
+            inv.args
+                .iter()
+                .position(|a| a == v)
+                .unwrap_or_else(|| panic!("{v} missing from {:?}", inv.args))
+        };
+        assert!(at("IdentitiesOnly=no") < at("IdentitiesOnly=yes"));
     }
 
     /// Runs the real snippet under `sh` with HOME pointed at a temp dir. This is

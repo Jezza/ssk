@@ -6,7 +6,7 @@ use std::path::Path;
 
 use super::install::squash;
 use super::runner::{SshInvocation, SshOutput, SshRunner};
-use super::target_args;
+use super::{identities_only, target_args};
 use crate::target::Target;
 
 pub const SNIPPET_SOURCE: &str = include_str!("revoke_snippet.sh");
@@ -21,8 +21,9 @@ pub fn remote_command() -> String {
     format!("exec sh -c '{}'", squash(SNIPPET_SOURCE))
 }
 
-/// `-i auth_key` *without* IdentitiesOnly: that key first, then whatever else ssh would
-/// try (agent, defaults, password), so revoking your only key still gets you in.
+/// `-i auth_key` first, then whatever else ssh would try (config and default keys,
+/// password), so revoking your only key still gets you in. `IdentitiesOnly=yes` keeps
+/// agent keys out of that "whatever else" (see [`identities_only`]).
 pub fn invocation(
     auth_key: &Path,
     target: &Target,
@@ -36,6 +37,7 @@ pub fn invocation(
         auth_key.display().to_string(),
     ];
     args.extend(target_args(target, extra_options));
+    args.extend(identities_only());
     args.push("--".to_string());
     args.push(target.host.clone());
     args.push(remote_command());
@@ -134,6 +136,8 @@ mod tests {
             "u",
             "-o",
             "ProxyJump=b",
+            "-o",
+            "IdentitiesOnly=yes",
             "--",
             "h",
         ]
@@ -144,7 +148,7 @@ mod tests {
         assert_eq!(inv.args, expected);
         assert_eq!(inv.stdin.as_deref(), Some("ssh-ed25519 AAAA c\n"));
         assert!(!inv.capture);
-        assert!(!inv.args.iter().any(|a| a.contains("IdentitiesOnly")));
+        assert!(inv.args.iter().any(|a| a == "IdentitiesOnly=yes"));
     }
 
     #[test]

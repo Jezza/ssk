@@ -519,10 +519,11 @@ mod tests {
                 "call {install} authenticates with the old key"
             );
             assert!(
-                !calls[install]
+                calls[install]
                     .args
                     .iter()
-                    .any(|a| a.contains("IdentitiesOnly"))
+                    .any(|a| a == "IdentitiesOnly=yes"),
+                "call {install} must not let ssh spray agent keys"
             );
             assert_eq!(
                 calls[install].stdin.as_deref(),
