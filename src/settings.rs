@@ -17,6 +17,7 @@ pub struct Settings {
     pub quiet: bool,
     pub verbose: u8,
     pub color: ColorChoice,
+    pub json: bool,
     pub comment_template: String,
 }
 
@@ -33,6 +34,7 @@ impl Settings {
             quiet: cli.quiet,
             verbose: cli.verbose,
             color: cli.color,
+            json: cli.json,
             comment_template: DEFAULT_COMMENT_TEMPLATE.to_string(),
         })
     }
@@ -46,6 +48,7 @@ impl Settings {
             quiet: true,
             verbose: 0,
             color: ColorChoice::Never,
+            json: false,
             comment_template: DEFAULT_COMMENT_TEMPLATE.to_string(),
         }
     }

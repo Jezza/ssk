@@ -1,6 +1,13 @@
+pub mod add;
 pub mod completions;
+pub mod config;
 pub mod copy;
 pub mod doctor;
+pub mod hosts;
 pub mod list;
 pub mod new;
+pub mod rename;
+pub mod revoke;
+pub mod rm;
+pub mod rotate;
 pub mod show;

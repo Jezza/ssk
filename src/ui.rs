@@ -10,6 +10,7 @@ use crate::cli::ColorChoice;
 use crate::settings::Settings;
 
 pub struct Ui {
+    /// --quiet, or --json (human stdout would corrupt the document).
     quiet: bool,
     verbose: u8,
     yes: bool,
@@ -23,7 +24,7 @@ impl Ui {
             ColorChoice::Auto => owo_colors::unset_override(),
         }
         Ui {
-            quiet: settings.quiet,
+            quiet: settings.quiet || settings.json,
             verbose: settings.verbose,
             yes: settings.yes,
         }

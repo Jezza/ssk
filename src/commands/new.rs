@@ -7,7 +7,7 @@ use zeroize::Zeroizing;
 
 use crate::cli::NewArgs;
 use crate::commands::copy::{self, CopyOptions};
-use crate::identity::keygen::{self, KeySpec};
+use crate::identity::keygen::{self, KeySpec, KeyType};
 use crate::identity::{Identity, comment, name};
 use crate::settings::Settings;
 use crate::ssh::agent;
@@ -34,7 +34,8 @@ pub fn run(settings: &Settings, ui: &Ui, args: &NewArgs) -> anyhow::Result<u8> {
         }
     }
 
-    let bits = keygen::resolve_bits(args.key_type, args.bits)?;
+    let key_type = args.key_type.unwrap_or(KeyType::Ed25519);
+    let bits = keygen::resolve_bits(key_type, args.bits)?;
     let comment = args
         .comment
         .clone()
@@ -44,7 +45,7 @@ pub fn run(settings: &Settings, ui: &Ui, args: &NewArgs) -> anyhow::Result<u8> {
     if settings.dry_run {
         ui.info(format!(
             "would generate {}{} key '{}' with comment '{}' at {} ({})",
-            args.key_type.as_str(),
+            key_type.as_str(),
             bits.map(|b| format!("-{b}")).unwrap_or_default(),
             args.identity,
             comment,
@@ -62,7 +63,7 @@ pub fn run(settings: &Settings, ui: &Ui, args: &NewArgs) -> anyhow::Result<u8> {
     }
 
     let spec = KeySpec {
-        key_type: args.key_type,
+        key_type,
         bits,
         comment,
     };
