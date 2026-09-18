@@ -7,7 +7,7 @@ use crate::cli::ShowArgs;
 use crate::fsx;
 use crate::identity::Identity;
 use crate::identity::store;
-use crate::json::{self, IdentityFields, ShowJson};
+use crate::json::{self, DeploymentJson, IdentityFields, ShowJson};
 use crate::settings::Settings;
 use crate::ssh::agent::{self, AgentStatus};
 use crate::state::{Deployment, State};
@@ -137,7 +137,11 @@ pub fn render_json(
             .transpose()?
             .map(|m| format!("{m:04o}")),
         created: state.identity.get(&id.name).and_then(|x| x.created.clone()),
-        deployments: state.deployments(&id.name).to_vec(),
+        deployments: state
+            .deployments(&id.name)
+            .iter()
+            .map(DeploymentJson::from)
+            .collect(),
         ssh_config: conf.is_file().then_some(conf),
         public_key: id.public_key_line().ok(),
     })

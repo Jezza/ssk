@@ -99,6 +99,23 @@ fn show_json_lists_deployments_after_copy() {
 }
 
 #[test]
+fn show_json_emits_null_user_for_userless_deployment() {
+    let (tmp, _dir, s) = world();
+    let fake = fake_ssh(tmp.path());
+    ssk()
+        .env("SSK_SSH_BIN", &fake)
+        .env("FAKE_SSH_DIR", tmp.path())
+        .args(["--ssh-dir", &s, "copy", "work", "a.test:2222"])
+        .assert()
+        .success();
+    let (v, _) = json_of(ssk().args(["--ssh-dir", &s, "show", "work", "--json"]));
+    let d = &v["deployments"][0];
+    assert_eq!(d["user"], Value::Null);
+    assert_eq!(d["host"], "a.test");
+    assert_eq!(d.as_object().unwrap().len(), 5);
+}
+
+#[test]
 fn doctor_json_reports_and_fixes() {
     let (_tmp, dir, s) = world();
     let (v, code) = json_of(ssk().args(["--ssh-dir", &s, "doctor", "--json"]));

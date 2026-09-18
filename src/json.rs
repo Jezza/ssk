@@ -103,9 +103,32 @@ pub struct ShowJson {
     pub private_mode: String,
     pub public_mode: Option<String>,
     pub created: Option<String>,
-    pub deployments: Vec<Deployment>,
+    pub deployments: Vec<DeploymentJson>,
     pub ssh_config: Option<PathBuf>,
     pub public_key: Option<String>,
+}
+
+/// Like `state::Deployment`, but without `skip_serializing_if` on `user`: in the
+/// JSON document every optional field stays present as `null`, unlike the TOML file.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct DeploymentJson {
+    pub host: String,
+    pub user: Option<String>,
+    pub port: u16,
+    pub alias: String,
+    pub installed: String,
+}
+
+impl From<&Deployment> for DeploymentJson {
+    fn from(d: &Deployment) -> Self {
+        DeploymentJson {
+            host: d.host.clone(),
+            user: d.user.clone(),
+            port: d.port,
+            alias: d.alias.clone(),
+            installed: d.installed.clone(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -269,5 +292,19 @@ mod tests {
         let v = serde_json::to_value(h).unwrap();
         assert_eq!(v["user"], serde_json::Value::Null);
         assert_eq!(v["identities"][0]["name"], "work");
+    }
+
+    #[test]
+    fn deployment_json_keeps_null_user() {
+        let dep = Deployment {
+            host: "a.test".into(),
+            user: None,
+            port: 2222,
+            alias: "a.test".into(),
+            installed: "t".into(),
+        };
+        let v = serde_json::to_value(DeploymentJson::from(&dep)).unwrap();
+        assert_eq!(v["user"], serde_json::Value::Null);
+        assert_eq!(v.as_object().unwrap().len(), 5);
     }
 }
