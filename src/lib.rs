@@ -7,4 +7,5 @@ pub mod cli;
 pub mod commands;
 pub mod identity;
 pub mod settings;
+pub mod target;
 pub mod ui;
