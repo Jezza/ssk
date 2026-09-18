@@ -8,6 +8,7 @@ pub mod commands;
 pub mod fsx;
 pub mod identity;
 pub mod settings;
+pub mod ssh;
 pub mod state;
 pub mod target;
 pub mod ui;
