@@ -6,6 +6,7 @@ use anyhow::{Context, bail};
 use zeroize::Zeroizing;
 
 use crate::cli::NewArgs;
+use crate::commands::copy::{self, CopyOptions};
 use crate::identity::keygen::{self, KeySpec};
 use crate::identity::{Identity, comment, name};
 use crate::settings::Settings;
@@ -80,6 +81,20 @@ pub fn run(settings: &Settings, ui: &Ui, args: &NewArgs) -> anyhow::Result<u8> {
     let identity = Identity::load(&settings.ssh_dir, &args.identity)?;
     let public_line = identity.public_key_line()?;
     print_summary(ui, &identity, &public_line);
+
+    if !args.copy.is_empty() {
+        ui.info("");
+        let targets = copy::parse_targets(&args.copy, None, None)?;
+        let runner = copy::runner_for(settings)?;
+        return copy::run_targets(
+            settings,
+            ui,
+            &identity,
+            &targets,
+            &CopyOptions::default(),
+            runner.as_deref(),
+        );
+    }
     Ok(0)
 }
 

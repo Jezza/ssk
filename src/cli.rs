@@ -119,6 +119,10 @@ pub struct NewArgs {
     /// Overwrite an existing identity of the same name
     #[arg(short = 'f', long)]
     pub force: bool,
+
+    /// After creating, install the key on TARGET ([user@]host[:port]); repeatable
+    #[arg(long, value_name = "TARGET", action = ArgAction::Append)]
+    pub copy: Vec<String>,
 }
 
 #[derive(Args, Debug)]
