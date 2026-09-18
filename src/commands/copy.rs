@@ -34,12 +34,19 @@ impl Default for CopyOptions {
     }
 }
 
-impl From<&CopyArgs> for CopyOptions {
-    fn from(a: &CopyArgs) -> Self {
+impl CopyOptions {
+    /// Flags win; when neither `--write-config` nor `--no-config` is given the setting decides.
+    pub fn from_args(a: &CopyArgs, settings: &Settings) -> Self {
         CopyOptions {
             ssh_options: a.ssh_option.clone(),
             alias: a.alias.clone(),
-            write_config: !a.no_config,
+            write_config: if a.write_config {
+                true
+            } else if a.no_config {
+                false
+            } else {
+                settings.write_ssh_config
+            },
             force: a.force,
         }
     }
@@ -95,7 +102,7 @@ pub fn runner_for(settings: &Settings) -> anyhow::Result<Option<Box<dyn SshRunne
 
 pub fn run(settings: &Settings, ui: &Ui, args: &CopyArgs) -> anyhow::Result<u8> {
     let identity = store::resolve(&settings.ssh_dir, &args.identity)?;
-    let opts = CopyOptions::from(args);
+    let opts = CopyOptions::from_args(args, settings);
     if opts.alias.is_some() && args.targets.len() != 1 {
         bail!(
             "--alias applies to exactly one target; got {}",

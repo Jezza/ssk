@@ -34,8 +34,9 @@ pub fn run(settings: &Settings, ui: &Ui, args: &NewArgs) -> anyhow::Result<u8> {
         }
     }
 
-    let key_type = args.key_type.unwrap_or(KeyType::Ed25519);
-    let bits = keygen::resolve_bits(key_type, args.bits)?;
+    let key_type = args.key_type.unwrap_or(settings.default_type);
+    let default_bits = (key_type == KeyType::Rsa).then_some(settings.rsa_bits);
+    let bits = keygen::resolve_bits(key_type, args.bits.or(default_bits))?;
     let comment = args
         .comment
         .clone()
@@ -74,7 +75,8 @@ pub fn run(settings: &Settings, ui: &Ui, args: &NewArgs) -> anyhow::Result<u8> {
     st.record_created(&args.identity, state::now());
     st.save(&settings.ssh_dir)?;
 
-    if args.add {
+    let add_to_agent = !args.no_add && (args.add || settings.add_to_agent);
+    if add_to_agent {
         agent::add(&written.private_path, ui)
             .context("the key was created, but adding it to ssh-agent failed")?;
     }
@@ -92,7 +94,10 @@ pub fn run(settings: &Settings, ui: &Ui, args: &NewArgs) -> anyhow::Result<u8> {
             ui,
             &identity,
             &targets,
-            &CopyOptions::default(),
+            &CopyOptions {
+                write_config: settings.write_ssh_config,
+                ..Default::default()
+            },
             runner.as_deref(),
         );
     }

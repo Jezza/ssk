@@ -7,6 +7,8 @@ pub fn ssk() -> assert_cmd::Command {
     cmd.env_remove("SSH_AUTH_SOCK")
         .env_remove("SSK_SSH_DIR")
         .env_remove("SSK_SSH_BIN")
+        .env_remove("SSK_SSH_ADD_BIN")
+        .env("SSK_CONFIG", "/nonexistent/ssk/config.toml")
         .env("NO_COLOR", "1");
     cmd
 }
