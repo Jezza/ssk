@@ -183,8 +183,8 @@ pub fn parse_bool(s: &str, key: &'static str) -> Result<bool, ConfigError> {
     }
 }
 
-/// `~/x` and relative paths are taken against `home`; absolute paths pass through.
-pub fn expand_dir(raw: &str, home: Option<&Path>) -> PathBuf {
+/// `~` and `~/rest` expand against `home`; everything else passes through unchanged.
+pub fn expand_tilde(raw: &str, home: Option<&Path>) -> PathBuf {
     let Some(home) = home else {
         return PathBuf::from(raw);
     };
@@ -194,6 +194,17 @@ pub fn expand_dir(raw: &str, home: Option<&Path>) -> PathBuf {
     if let Some(rest) = raw.strip_prefix("~/") {
         return home.join(rest);
     }
+    PathBuf::from(raw)
+}
+
+/// `~/x` and relative paths are taken against `home`; absolute paths pass through.
+pub fn expand_dir(raw: &str, home: Option<&Path>) -> PathBuf {
+    if raw.starts_with('~') {
+        return expand_tilde(raw, home);
+    }
+    let Some(home) = home else {
+        return PathBuf::from(raw);
+    };
     let p = PathBuf::from(raw);
     if p.is_relative() { home.join(p) } else { p }
 }
@@ -377,6 +388,15 @@ mod tests {
         assert_eq!(expand_dir("keys", h), PathBuf::from("/home/j/keys"));
         assert_eq!(expand_dir("/srv/keys", h), PathBuf::from("/srv/keys"));
         assert_eq!(expand_dir("~/.ssh", None), PathBuf::from("~/.ssh"));
+    }
+
+    #[test]
+    fn expand_tilde_only_touches_leading_tilde() {
+        let h = Some(Path::new("/home/j"));
+        assert_eq!(expand_tilde("~/.ssh", h), PathBuf::from("/home/j/.ssh"));
+        assert_eq!(expand_tilde("~", h), PathBuf::from("/home/j"));
+        assert_eq!(expand_tilde("keys", h), PathBuf::from("keys"));
+        assert_eq!(expand_tilde("~/.ssh", None), PathBuf::from("~/.ssh"));
     }
 
     #[test]

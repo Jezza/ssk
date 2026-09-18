@@ -137,7 +137,7 @@ impl Settings {
                     Source::Flag
                 };
                 sources.insert("ssh_dir", src);
-                d.clone()
+                config_file::expand_tilde(&d.to_string_lossy(), home.as_deref())
             }
             (None, Some(f)) => {
                 sources.insert("ssh_dir", Source::File);
@@ -333,6 +333,32 @@ mod tests {
         };
         let s = resolve(&["--ssh-dir", "/tmp/a", "list"], env, FileConfig::default());
         assert_eq!(s.sources["ssh_dir"], Source::Env);
+    }
+
+    #[test]
+    fn ssh_dir_flag_and_env_expand_tilde_but_not_relative_paths() {
+        let s = resolve(
+            &["--ssh-dir", "~/keys", "list"],
+            EnvConfig::default(),
+            FileConfig::default(),
+        );
+        assert_eq!(s.ssh_dir, PathBuf::from("/home/j/keys"));
+        assert_eq!(s.sources["ssh_dir"], Source::Flag);
+
+        let env = EnvConfig {
+            ssh_dir: Some(PathBuf::from("~/keys")),
+            ..Default::default()
+        };
+        let s = resolve(&["--ssh-dir", "~/keys", "list"], env, FileConfig::default());
+        assert_eq!(s.ssh_dir, PathBuf::from("/home/j/keys"));
+        assert_eq!(s.sources["ssh_dir"], Source::Env);
+
+        let s = resolve(
+            &["--ssh-dir", "rel/keys", "list"],
+            EnvConfig::default(),
+            FileConfig::default(),
+        );
+        assert_eq!(s.ssh_dir, PathBuf::from("rel/keys"));
     }
 
     #[test]

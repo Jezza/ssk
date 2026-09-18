@@ -152,3 +152,15 @@ fn ssh_dir_from_file_expands_tilde_against_home() {
     assert!(w.root.join("keys/k").exists());
     assert_eq!(mode(&w.root.join("keys")), 0o700);
 }
+
+#[test]
+fn ssh_dir_env_expands_tilde_against_home() {
+    let w = world();
+    ssk()
+        .env("SSK_SSH_DIR", "~/envkeys")
+        .env("HOME", &w.root)
+        .args(["new", "k", "--no-passphrase"])
+        .assert()
+        .success();
+    assert!(w.root.join("envkeys/k").exists());
+}
