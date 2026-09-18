@@ -1,6 +1,7 @@
 //! Everything that spawns `ssh` or `ssh-add`.
 
 pub mod agent;
+pub mod config;
 pub mod install;
 pub mod probe;
 pub mod runner;
