@@ -1,13 +1,19 @@
 #![allow(dead_code)]
 use std::{fs, os::unix::fs::PermissionsExt, path::Path};
 
-/// A `ssk` command with a clean environment: no agent, no inherited ssh dir, no colour.
+/// A `ssk` command with a clean environment: no agent, no colour, and none of the
+/// developer's own `SSK_*` variables or config file.
 pub fn ssk() -> assert_cmd::Command {
     let mut cmd = assert_cmd::Command::new(env!("CARGO_BIN_EXE_ssk"));
     cmd.env_remove("SSH_AUTH_SOCK")
         .env_remove("SSK_SSH_DIR")
         .env_remove("SSK_SSH_BIN")
         .env_remove("SSK_SSH_ADD_BIN")
+        .env_remove("SSK_DEFAULT_TYPE")
+        .env_remove("SSK_RSA_BITS")
+        .env_remove("SSK_COMMENT")
+        .env_remove("SSK_ADD_TO_AGENT")
+        .env_remove("SSK_WRITE_SSH_CONFIG")
         .env("SSK_CONFIG", "/nonexistent/ssk/config.toml")
         .env("NO_COLOR", "1");
     cmd

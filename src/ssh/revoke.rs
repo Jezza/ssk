@@ -252,6 +252,25 @@ mod tests {
             fs::metadata(&ak).unwrap().permissions().mode() & 0o777,
             0o600
         );
+
+        // a line carrying options in front of the key still matches: we look for the
+        // blob, wherever it sits on the line
+        fs::write(
+            &ak,
+            "command=\"echo hi\",no-pty ssh-ed25519 AAAAfour four\nssh-ed25519 AAAAtwo two\n",
+        )
+        .unwrap();
+        assert_eq!(run(SNIPPET_SOURCE, "ssh-ed25519 AAAAfour four\n"), 0);
+        assert_eq!(read(), "ssh-ed25519 AAAAtwo two\n");
+
+        // every line with that blob goes, not just the first
+        fs::write(
+            &ak,
+            "ssh-ed25519 AAAAfive one\nssh-ed25519 AAAAtwo two\nssh-ed25519 AAAAfive again\n",
+        )
+        .unwrap();
+        assert_eq!(run(SNIPPET_SOURCE, "ssh-ed25519 AAAAfive elsewhere\n"), 0);
+        assert_eq!(read(), "ssh-ed25519 AAAAtwo two\n");
         assert_eq!(
             run(SNIPPET_SOURCE, "ssh-ed25519 AAAAone one\n"),
             3,
