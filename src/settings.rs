@@ -110,13 +110,35 @@ pub struct Settings {
 
 impl Settings {
     pub fn from_cli(cli: &Cli) -> anyhow::Result<Self> {
+        let (settings, problem) = Self::load(cli)?;
+        match problem {
+            Some(err) => Err(err),
+            None => Ok(settings),
+        }
+    }
+
+    /// `from_cli`, except that a config file which cannot be read or parsed is *reported*
+    /// rather than fatal: the settings come back built on defaults for the file's keys,
+    /// with the error beside them. `ssk config path|edit|set|unset` use this, so a broken
+    /// config file can still be repaired with ssk itself.
+    pub fn from_cli_lenient(cli: &Cli) -> anyhow::Result<(Self, Option<anyhow::Error>)> {
+        Self::load(cli)
+    }
+
+    fn load(cli: &Cli) -> anyhow::Result<(Self, Option<anyhow::Error>)> {
         let config_path = config_file::path();
-        let file = match &config_path {
-            Some(p) => config_file::load(p)?,
-            None => FileConfig::default(),
+        let (file, problem) = match &config_path {
+            Some(p) => match config_file::load(p) {
+                Ok(f) => (f, None),
+                Err(e) => (FileConfig::default(), Some(anyhow::Error::new(e))),
+            },
+            None => (FileConfig::default(), None),
         };
         let env = EnvConfig::from_env()?;
-        Self::resolve(cli, &env, &file, config_path, home_dir())
+        Ok((
+            Self::resolve(cli, &env, &file, config_path, home_dir())?,
+            problem,
+        ))
     }
 
     /// flag > env > file > default, per key. clap has already merged `SSK_SSH_DIR` into

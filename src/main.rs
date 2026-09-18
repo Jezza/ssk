@@ -1,10 +1,17 @@
 use std::process::ExitCode;
 
 use clap::Parser;
-use ssk::cli::{Cli, Command};
+use ssk::cli::{Cli, Command, ConfigAction};
 use ssk::commands;
 use ssk::settings::Settings;
 use ssk::ui::Ui;
+
+/// `ssk config path|set|unset|edit` must work on a config file ssk itself refuses to
+/// load, or a typo in it could only be fixed by hand. `config get` still fails fast:
+/// it is there to report the effective values, which a broken file does not have.
+fn repairs_the_config(command: &Command) -> bool {
+    matches!(command, Command::Config(args) if !matches!(args.action, ConfigAction::Get { .. }))
+}
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
@@ -15,14 +22,22 @@ fn main() -> ExitCode {
         );
         return ExitCode::from(2);
     }
-    let settings = match Settings::from_cli(&cli) {
-        Ok(s) => s,
+    let loaded = if repairs_the_config(&cli.command) {
+        Settings::from_cli_lenient(&cli)
+    } else {
+        Settings::from_cli(&cli).map(|s| (s, None))
+    };
+    let (settings, problem) = match loaded {
+        Ok(pair) => pair,
         Err(err) => {
             eprintln!("error: {err:#}");
             return ExitCode::from(1);
         }
     };
     let ui = Ui::new(&settings);
+    if let Some(err) = problem {
+        ui.warn(format!("{err:#}"));
+    }
     let result = match &cli.command {
         Command::New(args) => commands::new::run(&settings, &ui, args),
         Command::Copy(args) => commands::copy::run(&settings, &ui, args),

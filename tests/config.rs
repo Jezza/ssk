@@ -257,6 +257,41 @@ fn config_get_shows_values_and_sources() {
         .stderr(predicate::str::contains("unknown config key"));
 }
 
+/// A config file ssk cannot load must not lock the user out of the commands that exist
+/// to repair it. `config get` is the exception: it reports effective values.
+#[test]
+fn a_broken_config_file_can_still_be_repaired() {
+    let w = world();
+    write_config(&w, "nonsense = 1\n");
+    cmd(&w)
+        .args(["config", "path"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(w.config.to_str().unwrap()))
+        .stderr(predicate::str::contains("nonsense"));
+    cmd(&w)
+        .args(["config", "get"])
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains("nonsense"));
+
+    let editor = w.root.join("rewrite.sh");
+    fs::write(&editor, "#!/bin/sh\nprintf 'rsa_bits = 2048\\n' > \"$1\"\n").unwrap();
+    fs::set_permissions(&editor, fs::Permissions::from_mode(0o755)).unwrap();
+    cmd(&w)
+        .env("EDITOR", &editor)
+        .args(["config", "edit"])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("nonsense"));
+    assert_eq!(fs::read_to_string(&w.config).unwrap(), "rsa_bits = 2048\n");
+    cmd(&w)
+        .args(["config", "get", "rsa_bits"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("2048"));
+}
+
 #[test]
 fn config_get_json() {
     let w = world();
