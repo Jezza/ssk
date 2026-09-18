@@ -154,3 +154,109 @@ fn rm_drops_the_key_from_the_agent_when_loaded() {
         "{log}"
     );
 }
+
+#[test]
+fn rename_moves_files_state_and_generated_config() {
+    let w = world();
+    deploy(&w, "work", "a.test");
+    cmd(&w)
+        .args(["rename", "work", "job"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("renamed identity work -> job"));
+    assert!(w.dir.join("job").exists() && w.dir.join("job.pub").exists());
+    assert!(!w.dir.join("work").exists() && !w.dir.join("work.pub").exists());
+    assert!(!w.dir.join("ssk.d/work.conf").exists());
+    let conf = fs::read_to_string(w.dir.join("ssk.d/job.conf")).unwrap();
+    assert!(
+        conf.contains("/job\n") && !conf.contains("/work\n"),
+        "{conf}"
+    );
+    let st = state(&w);
+    assert!(
+        st.contains("[identity.job]") && !st.contains("[identity.work]"),
+        "{st}"
+    );
+    cmd(&w)
+        .args(["show", "job"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("a.test"));
+}
+
+#[test]
+fn rename_refuses_to_clobber_and_needs_a_source() {
+    let w = world();
+    cmd(&w)
+        .args(["new", "github", "--no-passphrase"])
+        .assert()
+        .success();
+    cmd(&w)
+        .args(["rename", "work", "github"])
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains("already exists"));
+    cmd(&w)
+        .args(["rename", "wrk", "x"])
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains("did you mean 'work'"));
+    cmd(&w)
+        .args(["rename", "work", "config"])
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains("reserved"));
+    assert!(w.dir.join("work").exists() && w.dir.join("github").exists());
+}
+
+#[test]
+fn rename_works_on_a_legacy_pem_key_without_a_pub() {
+    let w = world();
+    fs::write(
+        w.dir.join("old"),
+        "-----BEGIN RSA PRIVATE KEY-----\nMIIE\n-----END RSA PRIVATE KEY-----\n",
+    )
+    .unwrap();
+    cmd(&w)
+        .args(["rename", "old", "ancient"])
+        .assert()
+        .success();
+    assert!(w.dir.join("ancient").exists() && !w.dir.join("old").exists());
+}
+
+#[test]
+fn rename_warns_about_the_users_own_config() {
+    let w = world();
+    fs::write(
+        w.dir.join("config"),
+        format!(
+            "Host a\n    IdentityFile {d}/work\nHost b\n    IdentityFile {d}/work2\n",
+            d = w.dir.display()
+        ),
+    )
+    .unwrap();
+    cmd(&w)
+        .args(["rename", "work", "job"])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("still mentions 'work'"))
+        .stderr(predicate::str::contains("2:"))
+        .stderr(predicate::str::contains("work2").not());
+    assert!(
+        fs::read_to_string(w.dir.join("config"))
+            .unwrap()
+            .contains("/work\n"),
+        "user config must not be edited"
+    );
+}
+
+#[test]
+fn rename_dry_run_changes_nothing() {
+    let w = world();
+    cmd(&w)
+        .args(["--dry-run", "rename", "work", "job"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("dry run: nothing renamed"));
+    assert!(w.dir.join("work").exists() && !w.dir.join("job").exists());
+}
