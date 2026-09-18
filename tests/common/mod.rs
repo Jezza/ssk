@@ -20,25 +20,43 @@ pub fn mode(path: &Path) -> u32 {
 
 use std::path::PathBuf;
 
-/// A stand-in `ssh`. Probes (last argument `exit`) succeed only once an install has
-/// happened; an install copies stdin to `stdin.log` and creates the `installed` marker.
-/// Every argv is appended to `args.log`. All paths live under `$FAKE_SSH_DIR`.
+/// A stand-in `ssh`. Every argv is appended to `$FAKE_SSH_DIR/args.log`. Each host gets
+/// a fake home at `$FAKE_SSH_DIR/home-<host>` and the remote command (ssk's install or
+/// revoke snippet, `exec sh -c '...'`) really runs there under `sh`, with stdin also
+/// copied to `stdin.log`. A probe (last argument `exit`) succeeds when that home's
+/// authorized_keys carries the blob from the `-i` key's `.pub`.
+/// `FAKE_SSH_FAIL_HOST=<host>` refuses every connection to that host;
+/// `FAKE_SSH_FAIL_REVOKE=1` makes the revoke snippet fail with exit 1.
 pub fn fake_ssh(dir: &Path) -> PathBuf {
     let script = dir.join("fake-ssh");
     fs::write(
         &script,
         r#"#!/bin/sh
 printf '%s\n' "$*" >> "$FAKE_SSH_DIR/args.log"
-last=""
-for a in "$@"; do last="$a"; done
-if [ "$last" = "exit" ]; then
-  if [ -f "$FAKE_SSH_DIR/installed" ]; then exit 0; fi
-  echo "deploy@example.test: Permission denied (publickey)." >&2
+host=""; key=""; prev=""; last=""
+for a in "$@"; do
+  if [ "$prev" = "--" ] && [ -z "$host" ]; then host="$a"; fi
+  if [ "$prev" = "-i" ]; then key="$a"; fi
+  prev="$a"; last="$a"
+done
+if [ -n "$FAKE_SSH_FAIL_HOST" ] && [ "$host" = "$FAKE_SSH_FAIL_HOST" ]; then
+  echo "ssh: connect to host $host port 22: Connection refused" >&2
   exit 255
 fi
+HOME="$FAKE_SSH_DIR/home-$host"; export HOME; mkdir -p "$HOME"
+if [ "$last" = "exit" ]; then
+  blob=$(awk '{print $2}' "$key.pub")
+  if [ -f "$HOME/.ssh/authorized_keys" ] && grep -qF -- " $blob" "$HOME/.ssh/authorized_keys"; then
+    exit 0
+  fi
+  echo "deploy@$host: Permission denied (publickey)." >&2
+  exit 255
+fi
+case "$last" in
+  *"grep -vF"*) if [ -n "$FAKE_SSH_FAIL_REVOKE" ]; then echo "remote: disk on fire" >&2; exit 1; fi;;
+esac
 cat > "$FAKE_SSH_DIR/stdin.log"
-touch "$FAKE_SSH_DIR/installed"
-exit 0
+sh -c "$last" < "$FAKE_SSH_DIR/stdin.log"
 "#,
     )
     .unwrap();
