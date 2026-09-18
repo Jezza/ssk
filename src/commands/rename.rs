@@ -68,12 +68,18 @@ pub fn run(settings: &Settings, ui: &Ui, args: &RenameArgs) -> anyhow::Result<u8
     if old_pub.is_file()
         && let Err(e) = fs::rename(&old_pub, &new_pub)
     {
-        let _ = fs::rename(&new_priv, &old_priv);
-        return Err(e).with_context(|| {
-            format!(
-                "renaming {}; the private key was moved back",
+        return Err(match fs::rename(&new_priv, &old_priv) {
+            Ok(()) => anyhow::Error::new(e).context(format!(
+                "renaming {}; the private key was moved back to {}",
+                old_pub.display(),
+                old_priv.display()
+            )),
+            Err(undo) => anyhow::Error::new(e).context(format!(
+                "renaming {}; moving the private key back also failed ({undo}), so it is now at {} while the public key is still at {}",
+                old_pub.display(),
+                new_priv.display(),
                 old_pub.display()
-            )
+            )),
         });
     }
     if st.rename_identity(old, new) {
