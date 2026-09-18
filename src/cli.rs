@@ -349,6 +349,10 @@ pub struct RotateArgs {
     #[arg(short = 'a', long)]
     pub add: bool,
 
+    /// Don't load the new key into ssh-agent, even if add_to_agent is set
+    #[arg(long, conflicts_with = "add")]
+    pub no_add: bool,
+
     /// Extra ssh option for every ssh call, passed through as -o (repeatable)
     #[arg(short = 'o', long = "ssh-option", value_name = "K=V", action = ArgAction::Append)]
     pub ssh_option: Vec<String>,

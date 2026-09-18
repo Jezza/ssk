@@ -132,7 +132,12 @@ pub fn swap(ssh_dir: &Path, name: &str, lingering: &[Deployment], now: &str) -> 
     if lingering.is_empty() {
         fs::remove_file(path(&old_n))
             .with_context(|| format!("removing {}", path(&old_n).display()))?;
-        let _ = fs::remove_file(pub_path(&old_n));
+        // A leftover <name>.old.pub would trip the `.old` guard on the next rotation with
+        // a misleading "a previous rotation left work.old behind", so say so now.
+        if pub_path(&old_n).is_file() {
+            fs::remove_file(pub_path(&old_n))
+                .with_context(|| format!("removing {}", pub_path(&old_n).display()))?;
+        }
         st.identity.remove(&old_n);
     } else {
         let entry = st.identity.entry(old_n).or_default();
@@ -177,7 +182,12 @@ pub fn run(settings: &Settings, ui: &Ui, args: &RotateArgs) -> anyhow::Result<u8
     } else {
         None
     };
-    let bits = match keygen::resolve_bits(key_type, args.bits.or(inherited)) {
+    // `-t rsa` without `-b` gets the configured size, exactly as `ssk new` does.
+    let requested = args
+        .bits
+        .or(inherited)
+        .or((key_type == KeyType::Rsa).then_some(settings.rsa_bits));
+    let bits = match keygen::resolve_bits(key_type, requested) {
         Ok(b) => b,
         Err(_) if args.bits.is_none() && inherited.is_some() => {
             // e.g. rsa 1024: that size is no longer allowed, so use the configured default.
@@ -203,7 +213,7 @@ pub fn run(settings: &Settings, ui: &Ui, args: &RotateArgs) -> anyhow::Result<u8
             old.comment.clone()
         }
     });
-    let add = args.add || settings.add_to_agent;
+    let add = !args.no_add && (args.add || settings.add_to_agent);
     let type_label = match bits {
         Some(b) => format!("{} {b}", key_type.as_str()),
         None => key_type.as_str().to_string(),

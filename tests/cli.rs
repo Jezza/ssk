@@ -112,6 +112,19 @@ fn new_and_copy_have_the_override_flags() {
 }
 
 #[test]
+fn rotate_has_the_agent_override_flags() {
+    ssk()
+        .args(["rotate", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--no-add"));
+    ssk()
+        .args(["rotate", "x", "--add", "--no-add"])
+        .assert()
+        .code(2);
+}
+
+#[test]
 fn completions_mention_new_subcommands() {
     ssk()
         .args(["completions", "bash"])

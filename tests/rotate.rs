@@ -222,6 +222,20 @@ fn rotate_dry_run_and_refusal_touch_nothing() {
 }
 
 #[test]
+fn rotate_to_rsa_without_a_size_uses_rsa_bits() {
+    let w = world();
+    cmd(&w)
+        .env("SSK_RSA_BITS", "2048")
+        .args(["-y", "rotate", "work", "--no-passphrase", "-t", "rsa"])
+        .assert()
+        .success();
+    cmd(&w)
+        .args(["show", "work"])
+        .assert()
+        .stdout(predicate::str::contains("rsa 2048"));
+}
+
+#[test]
 fn rotate_honours_type_override_and_keeps_comment() {
     let w = world();
     cmd(&w)
