@@ -127,32 +127,101 @@ fn rm_cleans_a_dangling_state_entry() {
     assert!(!state(&w).contains("[identity.work]"));
 }
 
-#[test]
-fn rm_drops_the_key_from_the_agent_when_loaded() {
-    let w = world();
-    let fake = fake_ssh_add(&w.root);
-    let out = cmd(&w)
+/// `SHA256:...` of `work`, as `ssh-add -l` would print it.
+fn fingerprint(w: &World) -> String {
+    let out = cmd(w)
         .args(["show", "work", "--fingerprint"])
         .output()
         .unwrap();
-    let fp = String::from_utf8(out.stdout).unwrap().trim().to_string();
+    String::from_utf8(out.stdout).unwrap().trim().to_string()
+}
+
+/// The key blob (second field) of `work.pub`.
+fn blob(w: &World) -> String {
+    let line = fs::read_to_string(w.dir.join("work.pub")).unwrap();
+    line.split_whitespace().nth(1).unwrap().to_string()
+}
+
+/// `cmd` talking to the fake ssh-add in `w.root`.
+fn agent_cmd(w: &World) -> assert_cmd::Command {
+    let fake = fake_ssh_add(&w.root);
+    let mut c = cmd(w);
+    c.env("SSH_AUTH_SOCK", "/nonexistent/agent.sock")
+        .env("SSK_SSH_ADD_BIN", &fake)
+        .env("FAKE_AGENT_DIR", &w.root);
+    c
+}
+
+fn ssh_add_log(w: &World) -> String {
+    fs::read_to_string(w.root.join("ssh-add.log")).unwrap_or_default()
+}
+
+#[test]
+fn rm_drops_the_key_from_the_agent_when_loaded() {
+    let w = world();
     fs::write(
         w.root.join("loaded"),
-        format!("256 {fp} work@box (ED25519)\n"),
+        format!("256 {} work@box (ED25519)\n", fingerprint(&w)),
     )
     .unwrap();
-    cmd(&w)
-        .env("SSH_AUTH_SOCK", "/nonexistent/agent.sock")
-        .env("SSK_SSH_ADD_BIN", &fake)
-        .env("FAKE_AGENT_DIR", &w.root)
-        .args(["-y", "rm", "work"])
-        .assert()
-        .success();
-    let log = fs::read_to_string(w.root.join("ssh-add.log")).unwrap();
+    agent_cmd(&w).args(["-y", "rm", "work"]).assert().success();
+    let log = ssh_add_log(&w);
     assert!(
         log.contains(&format!("-d {}", w.dir.join("work").display())),
         "{log}"
     );
+}
+
+/// gcr-ssh-agent (GNOME) lists every `~/.ssh/*.pub` as loaded, refuses `ssh-add -d` for the
+/// ones it never actually holds, and stops listing them once the .pub is gone. Nothing was
+/// in the agent, so nothing is worth a warning, and ssh-add's complaint stays out of sight.
+#[test]
+fn rm_stays_quiet_when_the_agent_only_listed_the_key_from_its_pub() {
+    let w = world();
+    fs::write(
+        w.root.join("advertised"),
+        format!(
+            "{} {} 256 {} work@box (ED25519)\n",
+            w.dir.join("work.pub").display(),
+            blob(&w),
+            fingerprint(&w)
+        ),
+    )
+    .unwrap();
+    agent_cmd(&w)
+        .env("FAKE_SSH_ADD_REFUSE", "1")
+        .args(["-y", "rm", "work"])
+        .assert()
+        .success()
+        .stderr(predicate::str::is_empty())
+        .stdout(predicate::str::contains("removed identity work"));
+    assert!(ssh_add_log(&w).contains("-d "), "{}", ssh_add_log(&w));
+    assert!(!w.dir.join("work").exists());
+}
+
+/// A real agent that refuses the delete still holds the key after the files are gone: that
+/// is the one case worth a warning, and the warning line carries ssh-add's reason.
+#[test]
+fn rm_warns_when_the_agent_refuses_to_drop_a_key_it_still_holds() {
+    let w = world();
+    fs::write(
+        w.root.join("loaded"),
+        format!("256 {} work@box (ED25519)\n", fingerprint(&w)),
+    )
+    .unwrap();
+    agent_cmd(&w)
+        .env("FAKE_SSH_ADD_REFUSE", "1")
+        .args(["-y", "rm", "work"])
+        .assert()
+        .success()
+        .stderr(predicate::function(|s: &str| {
+            s.lines().any(|l| {
+                l.contains("could not remove 'work' from ssh-agent")
+                    && l.contains("agent refused operation")
+            })
+        }))
+        .stdout(predicate::str::contains("removed identity work"));
+    assert!(!w.dir.join("work").exists());
 }
 
 #[test]

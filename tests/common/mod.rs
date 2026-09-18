@@ -85,8 +85,12 @@ pub fn unreachable_ssh(dir: &Path) -> PathBuf {
 }
 
 /// A stand-in `ssh-add`. Every argv is appended to `$FAKE_AGENT_DIR/ssh-add.log`.
-/// `-l` prints `$FAKE_AGENT_DIR/loaded` when that file is non-empty, otherwise the real
-/// "no identities" message with exit 1. Adding fails when `FAKE_SSH_ADD_FAIL` is set.
+/// `-l` prints `$FAKE_AGENT_DIR/loaded` plus, like gcr-ssh-agent listing every `~/.ssh/*.pub`
+/// it never loaded, one line per entry of `$FAKE_AGENT_DIR/advertised` (`<pub-path> <blob>
+/// <ssh-add -l line>`) whose file still exists and still carries that blob; with nothing to
+/// list it prints the real "no identities" message with exit 1. `-d` fails with ssh-add's
+/// "agent refused operation" when `FAKE_SSH_ADD_REFUSE` is set. Adding fails when
+/// `FAKE_SSH_ADD_FAIL` is set.
 pub fn fake_ssh_add(dir: &Path) -> PathBuf {
     let script = dir.join("fake-ssh-add");
     fs::write(
@@ -95,9 +99,21 @@ pub fn fake_ssh_add(dir: &Path) -> PathBuf {
 printf '%s\n' "$*" >> "$FAKE_AGENT_DIR/ssh-add.log"
 case "$1" in
   -l)
-    if [ -s "$FAKE_AGENT_DIR/loaded" ]; then cat "$FAKE_AGENT_DIR/loaded"; exit 0; fi
-    echo "The agent has no identities."; exit 1;;
-  -d) exit 0;;
+    out="$FAKE_AGENT_DIR/listing.$$"
+    : > "$out"
+    [ -s "$FAKE_AGENT_DIR/loaded" ] && cat "$FAKE_AGENT_DIR/loaded" >> "$out"
+    if [ -s "$FAKE_AGENT_DIR/advertised" ]; then
+      while read -r pub blob line; do
+        if [ -f "$pub" ] && grep -qF -- "$blob" "$pub"; then printf '%s\n' "$line" >> "$out"; fi
+      done < "$FAKE_AGENT_DIR/advertised"
+    fi
+    if [ -s "$out" ]; then cat "$out"; rm -f "$out"; exit 0; fi
+    rm -f "$out"; echo "The agent has no identities."; exit 1;;
+  -d)
+    if [ -n "$FAKE_SSH_ADD_REFUSE" ]; then
+      echo "Could not remove identity \"$2\": agent refused operation" >&2; exit 1
+    fi
+    exit 0;;
   *)
     if [ -n "$FAKE_SSH_ADD_FAIL" ]; then echo "Could not add identity" >&2; exit 1; fi
     exit 0;;

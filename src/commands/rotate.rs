@@ -374,15 +374,19 @@ pub fn run(settings: &Settings, ui: &Ui, args: &RotateArgs) -> anyhow::Result<u8
         }
     }
 
-    // 4. swap
-    if in_agent(&old)
-        && let Err(e) = agent::delete(&old.private_path, ui)
+    // 4. swap. ssh-add -d needs the old .pub, so it goes before the swap; whether a
+    // failure matters is only known afterwards (agent::still_loaded).
+    let agent_failure = in_agent(&old)
+        .then(|| agent::delete(&old.private_path, ui).err())
+        .flatten();
+    swap(dir, &name, &lingering, &state::now())?;
+    if let Some(e) = agent_failure
+        && agent::still_loaded(&old.fingerprint)
     {
         ui.warn(format!(
             "could not remove the old key from ssh-agent: {e:#}"
         ));
     }
-    swap(dir, &name, &lingering, &state::now())?;
     let rotated = Identity::load(dir, &name)?;
     ui.success(format!("rotated identity {name}"));
     ui.info(format!("  type         {}", rotated.type_label()));

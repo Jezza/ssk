@@ -4,7 +4,7 @@ use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use anyhow::ensure;
+use anyhow::{bail, ensure};
 
 use crate::ui::Ui;
 
@@ -69,16 +69,34 @@ pub fn add(private_key: &Path, ui: &Ui) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// `ssh-add -d <key>`. ssh-add reads `<key>.pub` to know which key to drop.
+/// `ssh-add -d <key>`. ssh-add reads `<key>.pub` to know which key to drop, so it never
+/// prompts and its output can be captured: a failure carries ssh-add's own last line
+/// (`Could not remove identity "...": agent refused operation`), and the caller decides
+/// whether that is worth showing (see `still_loaded`).
 pub fn delete(private_key: &Path, ui: &Ui) -> anyhow::Result<()> {
     let shown = private_key.display().to_string();
     ui.command("ssh-add", &["-d".to_string(), shown]);
-    let status = Command::new(program())
+    let out = Command::new(program())
         .arg("-d")
         .arg(private_key)
-        .status()?;
-    ensure!(status.success(), "ssh-add -d exited with {status}");
-    Ok(())
+        .output()?;
+    if out.status.success() {
+        return Ok(());
+    }
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    match stderr.lines().map(str::trim).rev().find(|l| !l.is_empty()) {
+        Some(reason) => bail!("ssh-add -d: {reason}"),
+        None => bail!("ssh-add -d exited with {}", out.status),
+    }
+}
+
+/// Asked after a failed `delete`, once the key's files are gone: does the agent still list
+/// the key? Only then is the failure worth a warning. gcr-ssh-agent (GNOME) lists every
+/// `~/.ssh/*.pub` as loaded, refuses `ssh-add -d` for the ones it never actually holds, and
+/// stops listing them as soon as the .pub is deleted; a real ssh-agent keeps listing a key
+/// it still holds. No agent to ask counts as not loaded.
+pub fn still_loaded(fingerprint: &str) -> bool {
+    contains(&status(), fingerprint) == Some(true)
 }
 
 #[cfg(test)]

@@ -3,7 +3,7 @@ mod common;
 use std::fs;
 use std::path::PathBuf;
 
-use common::{fake_ssh, ssk};
+use common::{fake_ssh, fake_ssh_add, ssk};
 use predicates::prelude::*;
 
 struct World {
@@ -198,6 +198,41 @@ fn rotate_without_deployments_only_swaps_locally() {
         .stderr(predicate::str::contains("no deployments recorded"));
     assert_ne!(blob(&w, "work"), old);
     assert!(!w.root.join("args.log").exists(), "no ssh calls");
+}
+
+/// Same gcr-ssh-agent phantom as in the `rm` tests: the old key was only ever listed from
+/// its .pub, so a refused `ssh-add -d` is not worth a warning once the swap has removed it.
+#[test]
+fn rotate_stays_quiet_when_the_agent_only_listed_the_old_key_from_its_pub() {
+    let w = world();
+    let fake = fake_ssh_add(&w.root);
+    let out = cmd(&w)
+        .args(["show", "work", "--fingerprint"])
+        .output()
+        .unwrap();
+    let fp = String::from_utf8(out.stdout).unwrap().trim().to_string();
+    fs::write(
+        w.root.join("advertised"),
+        format!(
+            "{} {} 256 {fp} work@box (ED25519)\n",
+            w.dir.join("work.pub").display(),
+            blob(&w, "work")
+        ),
+    )
+    .unwrap();
+    cmd(&w)
+        .env("SSH_AUTH_SOCK", "/nonexistent/agent.sock")
+        .env("SSK_SSH_ADD_BIN", &fake)
+        .env("FAKE_AGENT_DIR", &w.root)
+        .env("FAKE_SSH_ADD_REFUSE", "1")
+        .args(["-y", "rotate", "work", "--no-passphrase"])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("ssh-agent").not())
+        .stderr(predicate::str::contains("agent refused operation").not())
+        .stdout(predicate::str::contains("rotated identity work"));
+    let log = fs::read_to_string(w.root.join("ssh-add.log")).unwrap();
+    assert!(log.contains("-d "), "{log}");
 }
 
 #[test]

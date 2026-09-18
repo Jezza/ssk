@@ -65,12 +65,12 @@ pub fn run(settings: &Settings, ui: &Ui, args: &RmArgs) -> anyhow::Result<u8> {
         return Ok(1);
     }
 
-    if let Some(id) = &identity
-        && agent::contains(&agent::status(), &id.fingerprint) == Some(true)
-        && let Err(e) = agent::delete(&id.private_path, ui)
-    {
-        ui.warn(format!("could not remove '{name}' from ssh-agent: {e:#}"));
-    }
+    // ssh-add -d needs the .pub, so this goes first; whether a failure matters is only
+    // known once the files are gone (agent::still_loaded).
+    let agent_failure = identity
+        .as_ref()
+        .filter(|id| agent::contains(&agent::status(), &id.fingerprint) == Some(true))
+        .and_then(|id| agent::delete(&id.private_path, ui).err());
     for (exists, path) in [
         (what.private, &private_path),
         (what.public, &public_path),
@@ -83,6 +83,12 @@ pub fn run(settings: &Settings, ui: &Ui, args: &RmArgs) -> anyhow::Result<u8> {
     if what.state {
         st.remove_identity(name);
         st.save(dir)?;
+    }
+    if let Some(e) = agent_failure
+        && let Some(id) = &identity
+        && agent::still_loaded(&id.fingerprint)
+    {
+        ui.warn(format!("could not remove '{name}' from ssh-agent: {e:#}"));
     }
     ui.success(format!("removed identity {name}"));
     Ok(0)
