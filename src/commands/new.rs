@@ -41,7 +41,12 @@ pub fn run(settings: &Settings, ui: &Ui, args: &NewArgs) -> anyhow::Result<u8> {
         .comment
         .clone()
         .unwrap_or_else(|| comment::render(&settings.comment_template, &args.identity));
-    let passphrase = read_passphrase(ui, args)?;
+    let passphrase = read_passphrase(
+        ui,
+        args.passphrase.as_deref(),
+        args.no_passphrase,
+        args.passphrase_stdin,
+    )?;
 
     if settings.dry_run {
         ui.info(format!(
@@ -104,15 +109,20 @@ pub fn run(settings: &Settings, ui: &Ui, args: &NewArgs) -> anyhow::Result<u8> {
     Ok(0)
 }
 
-/// `None` means no passphrase. Precedence: --no-passphrase, -N, --passphrase-stdin, prompt.
-fn read_passphrase(ui: &Ui, args: &NewArgs) -> anyhow::Result<Option<Zeroizing<String>>> {
-    if args.no_passphrase {
+/// `None` means no passphrase. Precedence: `none`, `explicit`, `from_stdin`, prompt.
+pub fn read_passphrase(
+    ui: &Ui,
+    explicit: Option<&str>,
+    none: bool,
+    from_stdin: bool,
+) -> anyhow::Result<Option<Zeroizing<String>>> {
+    if none {
         return Ok(None);
     }
-    if let Some(p) = &args.passphrase {
+    if let Some(p) = explicit {
         return Ok(non_empty(p));
     }
-    if args.passphrase_stdin {
+    if from_stdin {
         let mut line = String::new();
         io::stdin()
             .read_line(&mut line)

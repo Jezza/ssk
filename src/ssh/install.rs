@@ -2,6 +2,7 @@
 //! ssh-copy-id snippet over ssh, with the key on stdin.
 
 use std::io;
+use std::path::Path;
 
 use super::runner::{SshInvocation, SshOutput, SshRunner};
 use super::target_args;
@@ -26,14 +27,20 @@ pub fn remote_command() -> String {
     format!("exec sh -c '{}'", squash(SNIPPET_SOURCE))
 }
 
-/// ssh argv for the install step. Deliberately no `-i`/`IdentitiesOnly`: any auth that
-/// works (agent key, password, another key) is fine for getting the new key on.
+/// ssh argv for the install step. No `IdentitiesOnly`: any auth that works (agent key,
+/// password, another key) is fine for getting the new key on. `auth_key` adds one `-i`
+/// to try first; `rotate` passes the current key.
 pub fn invocation(
     target: &Target,
     extra_options: &[String],
     public_key_line: &str,
+    auth_key: Option<&Path>,
 ) -> SshInvocation {
     let mut args = vec!["-o".to_string(), "ControlPath=none".to_string()];
+    if let Some(k) = auth_key {
+        args.push("-i".to_string());
+        args.push(k.display().to_string());
+    }
     args.extend(target_args(target, extra_options));
     args.push("--".to_string());
     args.push(target.host.clone());
@@ -56,8 +63,14 @@ pub fn install(
     target: &Target,
     extra_options: &[String],
     public_key_line: &str,
+    auth_key: Option<&Path>,
 ) -> io::Result<InstallResult> {
-    let out: SshOutput = runner.run(&invocation(target, extra_options, public_key_line))?;
+    let out: SshOutput = runner.run(&invocation(
+        target,
+        extra_options,
+        public_key_line,
+        auth_key,
+    ))?;
     Ok(if out.success() {
         InstallResult::Installed
     } else {
@@ -104,7 +117,12 @@ mod tests {
             host: "h".into(),
             port: None,
         };
-        let inv = invocation(&t, &["ProxyJump=b".to_string()], "ssh-ed25519 AAAA c\n");
+        let inv = invocation(
+            &t,
+            &["ProxyJump=b".to_string()],
+            "ssh-ed25519 AAAA c\n",
+            None,
+        );
         let expected: Vec<String> = [
             "-o",
             "ControlPath=none",
@@ -140,13 +158,25 @@ mod tests {
             },
         ]);
         assert_eq!(
-            install(&ssh, &t, &[], "k").unwrap(),
+            install(&ssh, &t, &[], "k", None).unwrap(),
             InstallResult::Installed
         );
         assert_eq!(
-            install(&ssh, &t, &[], "k").unwrap(),
+            install(&ssh, &t, &[], "k", None).unwrap(),
             InstallResult::Failed { code: Some(255) }
         );
+    }
+
+    #[test]
+    fn auth_key_adds_a_single_i_without_identities_only() {
+        let t = Target {
+            user: None,
+            host: "h".into(),
+            port: None,
+        };
+        let inv = invocation(&t, &[], "k", Some(Path::new("/k/old")));
+        assert_eq!(&inv.args[..4], &["-o", "ControlPath=none", "-i", "/k/old"]);
+        assert!(!inv.args.iter().any(|a| a.contains("IdentitiesOnly")));
     }
 
     /// Runs the real snippet under `sh` with HOME pointed at a temp dir. This is

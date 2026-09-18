@@ -1,7 +1,7 @@
 //! `ssk copy <IDENTITY> <TARGET>...`: probe, install, verify, record, write ssh config.
 
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, bail};
 
@@ -21,6 +21,8 @@ pub struct CopyOptions {
     pub alias: Option<String>,
     pub write_config: bool,
     pub force: bool,
+    /// Extra -i for the install step; rotate passes the current key.
+    pub auth_key: Option<PathBuf>,
 }
 
 impl Default for CopyOptions {
@@ -30,6 +32,7 @@ impl Default for CopyOptions {
             alias: None,
             write_config: true,
             force: false,
+            auth_key: None,
         }
     }
 }
@@ -48,6 +51,7 @@ impl CopyOptions {
                 settings.write_ssh_config
             },
             force: a.force,
+            auth_key: None,
         }
     }
 }
@@ -211,9 +215,13 @@ pub fn copy_one(
         "{target}: installing '{}' (ssh may ask for your password)",
         identity.name
     ));
-    if let install::InstallResult::Failed { code } =
-        install::install(runner, target, &opts.ssh_options, public_line)?
-    {
+    if let install::InstallResult::Failed { code } = install::install(
+        runner,
+        target,
+        &opts.ssh_options,
+        public_line,
+        opts.auth_key.as_deref(),
+    )? {
         let status = code
             .map(|c| c.to_string())
             .unwrap_or_else(|| "a signal".to_string());
@@ -241,7 +249,12 @@ fn describe_dry_run(
     public_line: &str,
 ) {
     let probe_inv = probe::invocation(&identity.private_path, target, &opts.ssh_options);
-    let install_inv = install::invocation(target, &opts.ssh_options, public_line);
+    let install_inv = install::invocation(
+        target,
+        &opts.ssh_options,
+        public_line,
+        opts.auth_key.as_deref(),
+    );
     ui.info(format!("{target}: would run"));
     ui.info(format!("  ssh {}", shell_join(&probe_inv.args)));
     ui.info(format!(
