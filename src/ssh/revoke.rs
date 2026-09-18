@@ -14,6 +14,9 @@ pub const SNIPPET_SOURCE: &str = include_str!("revoke_snippet.sh");
 /// The snippet's exit status for "no such key here".
 pub const NOT_PRESENT_EXIT: i32 = 3;
 
+/// The snippet's exit status for "removed, but the SELinux relabel afterwards failed".
+pub const RELABEL_FAILED_EXIT: i32 = 4;
+
 pub fn remote_command() -> String {
     format!("exec sh -c '{}'", squash(SNIPPET_SOURCE))
 }
@@ -46,6 +49,8 @@ pub fn invocation(
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RevokeResult {
     Removed,
+    /// Removed, but restorecon failed afterwards: the file may carry the wrong SELinux label.
+    RemovedUnlabeled,
     NotPresent,
     /// 255 is ssh itself (connect or auth); anything else is the remote snippet.
     Failed {
@@ -56,6 +61,7 @@ pub enum RevokeResult {
 pub fn classify(out: &SshOutput) -> RevokeResult {
     match out.code {
         Some(0) => RevokeResult::Removed,
+        Some(RELABEL_FAILED_EXIT) => RevokeResult::RemovedUnlabeled,
         Some(NOT_PRESENT_EXIT) => RevokeResult::NotPresent,
         code => RevokeResult::Failed { code },
     }
@@ -97,6 +103,8 @@ mod tests {
         assert!(!s.contains('#'), "# would comment out the rest:\n{s}");
         assert!(s.starts_with("cd; umask 077;"), "{s}");
         assert!(s.contains("exit 3"), "{s}");
+        assert!(s.contains("exit 4"), "{s}");
+        assert!(s.ends_with("exit 0"), "{s}");
         assert!(s.contains("grep -vF -- \" $b\""), "{s}");
         assert!(s.contains("/etc/dropbear/authorized_keys"), "{s}");
         assert!(s.contains("restorecon"), "{s}");
@@ -147,6 +155,7 @@ mod tests {
         };
         assert_eq!(classify(&ok()), RevokeResult::Removed);
         assert_eq!(classify(&with(Some(3))), RevokeResult::NotPresent);
+        assert_eq!(classify(&with(Some(4))), RevokeResult::RemovedUnlabeled);
         assert_eq!(
             classify(&with(Some(255))),
             RevokeResult::Failed { code: Some(255) }
@@ -170,16 +179,22 @@ mod tests {
     #[test]
     fn snippet_removes_by_blob_and_reports_absence() {
         let home = tempfile::tempdir().unwrap();
-        let run = |snippet: &str, line: &str| -> i32 {
-            let mut child = Command::new("sh")
-                .arg("-c")
+        let run_with_extra_path = |snippet: &str, line: &str, extra_path: Option<&Path>| -> i32 {
+            let mut cmd = Command::new("sh");
+            cmd.arg("-c")
                 .arg(install::squash(snippet))
                 .env("HOME", home.path())
                 .stdin(Stdio::piped())
                 .stdout(Stdio::null())
-                .stderr(Stdio::inherit())
-                .spawn()
+                .stderr(Stdio::inherit());
+            if let Some(dir) = extra_path {
+                let joined = std::env::join_paths(std::iter::once(dir.to_path_buf()).chain(
+                    std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()),
+                ))
                 .unwrap();
+                cmd.env("PATH", joined);
+            }
+            let mut child = cmd.spawn().unwrap();
             child
                 .stdin
                 .take()
@@ -188,12 +203,44 @@ mod tests {
                 .unwrap();
             child.wait().unwrap().code().unwrap()
         };
+        let run = |snippet: &str, line: &str| -> i32 { run_with_extra_path(snippet, line, None) };
         let ak = home.path().join(".ssh/authorized_keys");
         let read = || fs::read_to_string(&ak).unwrap_or_default();
 
         assert_eq!(run(install::SNIPPET_SOURCE, "ssh-ed25519 AAAAone one\n"), 0);
         assert_eq!(run(install::SNIPPET_SOURCE, "ssh-ed25519 AAAAtwo two\n"), 0);
         assert_eq!(read().lines().count(), 2);
+
+        // restorecon present but failing: the key is still removed, but the exit code
+        // says the relabel didn't happen
+        assert_eq!(
+            run(install::SNIPPET_SOURCE, "ssh-ed25519 AAAAthree three\n"),
+            0
+        );
+        let fake_restorecon_dir = tempfile::tempdir().unwrap();
+        fs::write(
+            fake_restorecon_dir.path().join("restorecon"),
+            "#!/bin/sh\nexit 1\n",
+        )
+        .unwrap();
+        fs::set_permissions(
+            fake_restorecon_dir.path().join("restorecon"),
+            fs::Permissions::from_mode(0o755),
+        )
+        .unwrap();
+        assert_eq!(
+            run_with_extra_path(
+                SNIPPET_SOURCE,
+                "ssh-ed25519 AAAAthree three\n",
+                Some(fake_restorecon_dir.path()),
+            ),
+            4,
+            "removed, but restorecon failed"
+        );
+        assert!(
+            !read().contains("AAAAthree"),
+            "the key is gone even though restorecon failed"
+        );
 
         // a different comment still matches: we match the blob, not the line
         assert_eq!(
