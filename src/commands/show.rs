@@ -10,7 +10,7 @@ use crate::identity::store;
 use crate::json::{self, DeploymentJson, IdentityFields, ShowJson};
 use crate::settings::Settings;
 use crate::ssh::agent::{self, AgentStatus};
-use crate::state::{Deployment, State};
+use crate::state::State;
 use crate::ui::Ui;
 
 pub fn run(settings: &Settings, ui: &Ui, args: &ShowArgs) -> anyhow::Result<u8> {
@@ -102,7 +102,7 @@ pub fn render(
             writeln!(
                 s,
                 "    {:<28} alias {:<16} installed {}",
-                endpoint(d),
+                d.endpoint(),
                 d.alias,
                 d.installed
             )?;
@@ -145,17 +145,4 @@ pub fn render_json(
         ssh_config: conf.is_file().then_some(conf),
         public_key: id.public_key_line().ok(),
     })
-}
-
-fn endpoint(d: &Deployment) -> String {
-    let mut e = String::new();
-    if let Some(u) = &d.user {
-        e.push_str(u);
-        e.push('@');
-    }
-    e.push_str(&d.host);
-    if d.port != 22 {
-        e.push_str(&format!(":{}", d.port));
-    }
-    e
 }

@@ -41,6 +41,26 @@ impl Deployment {
     pub fn same_endpoint(&self, other: &Deployment) -> bool {
         self.host == other.host && self.user == other.user && self.port == other.port
     }
+
+    /// `user@host:port` with the port only when it is not 22; IPv6 hosts in brackets.
+    pub fn endpoint(&self) -> String {
+        let mut e = String::new();
+        if let Some(u) = &self.user {
+            e.push_str(u);
+            e.push('@');
+        }
+        if self.host.contains(':') {
+            e.push('[');
+            e.push_str(&self.host);
+            e.push(']');
+        } else {
+            e.push_str(&self.host);
+        }
+        if self.port != 22 {
+            e.push_str(&format!(":{}", self.port));
+        }
+        e
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -109,6 +129,40 @@ impl State {
             .get(name)
             .map(|s| s.deployments.as_slice())
             .unwrap_or(&[])
+    }
+
+    pub fn remove_identity(&mut self, name: &str) -> Option<IdentityState> {
+        self.identity.remove(name)
+    }
+
+    /// Move the entry for `old` to `new`. `false` when `old` had none.
+    pub fn rename_identity(&mut self, old: &str, new: &str) -> bool {
+        match self.identity.remove(old) {
+            Some(entry) => {
+                self.identity.insert(new.to_string(), entry);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Drop deployments of `name` on `host:port`. `user == None` matches any user.
+    /// Returns how many were removed.
+    pub fn remove_deployments(
+        &mut self,
+        name: &str,
+        host: &str,
+        user: Option<&str>,
+        port: u16,
+    ) -> usize {
+        let Some(entry) = self.identity.get_mut(name) else {
+            return 0;
+        };
+        let before = entry.deployments.len();
+        entry.deployments.retain(|d| {
+            !(d.host == host && d.port == port && user.is_none_or(|u| d.user.as_deref() == Some(u)))
+        });
+        before - entry.deployments.len()
     }
 }
 
@@ -186,5 +240,44 @@ mod tests {
         assert_eq!(n.len(), 20, "{n}");
         assert!(n.ends_with('Z'));
         assert_eq!(&n[10..11], "T");
+    }
+
+    #[test]
+    fn remove_and_rename_identity() {
+        let mut s = State::default();
+        s.record_created("work", "t".into());
+        s.record_deployment("work", dep("h", None, 22));
+        assert!(s.rename_identity("work", "job"));
+        assert!(!s.is_managed("work") && s.is_managed("job"));
+        assert_eq!(s.deployments("job").len(), 1);
+        assert!(!s.rename_identity("nope", "x"));
+        assert!(s.remove_identity("job").is_some());
+        assert!(s.remove_identity("job").is_none());
+        assert!(s.identity.is_empty());
+    }
+
+    #[test]
+    fn remove_deployments_matches_host_port_and_optionally_user() {
+        let mut s = State::default();
+        s.record_deployment("work", dep("h", Some("a"), 22));
+        s.record_deployment("work", dep("h", Some("b"), 22));
+        s.record_deployment("work", dep("h", Some("a"), 2222));
+        assert_eq!(s.remove_deployments("work", "h", Some("a"), 22), 1);
+        assert_eq!(s.deployments("work").len(), 2);
+        assert_eq!(
+            s.remove_deployments("work", "h", None, 22),
+            1,
+            "no user matches any user"
+        );
+        assert_eq!(s.remove_deployments("work", "h", Some("zz"), 2222), 0);
+        assert_eq!(s.remove_deployments("other", "h", None, 22), 0);
+        assert_eq!(s.deployments("work").len(), 1);
+    }
+
+    #[test]
+    fn endpoint_display() {
+        assert_eq!(dep("h", Some("u"), 22).endpoint(), "u@h");
+        assert_eq!(dep("h", None, 2222).endpoint(), "h:2222");
+        assert_eq!(dep("::1", Some("u"), 22).endpoint(), "u@[::1]");
     }
 }

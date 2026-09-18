@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 
 use super::name::{self, NameError};
 use super::{Identity, IdentityError};
+use crate::state::State;
 
 #[derive(Debug)]
 pub enum Entry {
@@ -129,15 +130,44 @@ pub fn suggest(name: &str, candidates: &[String]) -> Option<String> {
         .map(|(_, c)| c.clone())
 }
 
+/// What is left of `name`: any of these means `rm` has something to do.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct Remnants {
+    pub private: bool,
+    pub public: bool,
+    pub conf: bool,
+    pub state: bool,
+}
+
+impl Remnants {
+    pub fn any(self) -> bool {
+        self.private || self.public || self.conf || self.state
+    }
+}
+
+pub fn remnants(ssh_dir: &Path, name: &str, state: &State) -> Remnants {
+    Remnants {
+        private: ssh_dir.join(name).is_file(),
+        public: ssh_dir.join(format!("{name}.pub")).is_file(),
+        conf: ssh_dir.join("ssk.d").join(format!("{name}.conf")).is_file(),
+        state: state.is_managed(name),
+    }
+}
+
+/// The error `resolve` gives for a name with no private key, did-you-mean included.
+pub fn not_found(ssh_dir: &Path, name: &str) -> ResolveError {
+    let candidates = private_key_names(ssh_dir).unwrap_or_default();
+    ResolveError::NotFound {
+        name: name.to_string(),
+        dir: ssh_dir.to_path_buf(),
+        suggestion: suggest(name, &candidates),
+    }
+}
+
 pub fn resolve(ssh_dir: &Path, name: &str) -> Result<Identity, ResolveError> {
     name::validate(name)?;
     if !ssh_dir.join(name).is_file() {
-        let candidates = private_key_names(ssh_dir).unwrap_or_default();
-        return Err(ResolveError::NotFound {
-            name: name.to_string(),
-            dir: ssh_dir.to_path_buf(),
-            suggestion: suggest(name, &candidates),
-        });
+        return Err(not_found(ssh_dir, name));
     }
     Ok(Identity::load(ssh_dir, name)?)
 }
@@ -229,5 +259,48 @@ mod tests {
         let c = vec!["github".to_string(), "work".to_string()];
         assert_eq!(suggest("githb", &c).as_deref(), Some("github"));
         assert_eq!(suggest("zzzzzz", &c), None);
+    }
+
+    #[test]
+    fn remnants_reports_what_exists() {
+        let tmp = populated();
+        let d = tmp.path();
+        let mut st = crate::state::State::default();
+        st.record_created("ghost", "t".into());
+        st.record_created("work", "t".into());
+        let r = remnants(d, "work", &st);
+        assert_eq!(
+            r,
+            Remnants {
+                private: true,
+                public: true,
+                conf: false,
+                state: true
+            }
+        );
+        assert!(r.any());
+        assert_eq!(
+            remnants(d, "ghost", &st),
+            Remnants {
+                private: false,
+                public: false,
+                conf: false,
+                state: true
+            }
+        );
+        assert!(!remnants(d, "nothing", &st).any());
+        std::fs::create_dir_all(d.join("ssk.d")).unwrap();
+        std::fs::write(d.join("ssk.d/orphan.conf"), "").unwrap();
+        assert_eq!(
+            remnants(d, "orphan", &st),
+            Remnants {
+                private: false,
+                public: true,
+                conf: true,
+                state: false
+            }
+        );
+        let msg = not_found(d, "githb").to_string();
+        assert!(msg.contains("did you mean 'github'"), "{msg}");
     }
 }

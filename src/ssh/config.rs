@@ -110,6 +110,65 @@ pub fn write_conf(
     Ok(path)
 }
 
+/// Delete `ssk.d/<identity>.conf`. `Ok(false)` when there was none.
+pub fn remove_conf(ssh_dir: &Path, identity: &str) -> io::Result<bool> {
+    match fs::remove_file(conf_path(ssh_dir, identity)) {
+        Ok(()) => Ok(true),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(e) => Err(e),
+    }
+}
+
+/// The conf mirrors the deployments: written when there are some, deleted when none.
+pub fn sync_conf(
+    ssh_dir: &Path,
+    identity: &str,
+    deployments: &[Deployment],
+) -> io::Result<Option<PathBuf>> {
+    if deployments.is_empty() {
+        remove_conf(ssh_dir, identity)?;
+        Ok(None)
+    } else {
+        write_conf(ssh_dir, identity, deployments).map(Some)
+    }
+}
+
+/// Non-comment lines of the user's own `config` that name `<ssh_dir>/<name>` as a whole
+/// word, with 1-based line numbers. ssk never edits that file; callers warn.
+pub fn user_config_mentions(ssh_dir: &Path, name: &str) -> io::Result<Vec<(usize, String)>> {
+    let text = match fs::read_to_string(ssh_dir.join("config")) {
+        Ok(t) => t,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(e),
+    };
+    let mut needles = vec![
+        format!("{}/{name}", display_dir(ssh_dir)),
+        format!("{}/{name}", ssh_dir.display()),
+        format!("~/.ssh/{name}"),
+    ];
+    needles.dedup();
+    Ok(text
+        .lines()
+        .enumerate()
+        .filter(|(_, line)| {
+            let l = line.trim();
+            !l.starts_with('#') && needles.iter().any(|n| mentions(l, n))
+        })
+        .map(|(i, line)| (i + 1, line.to_string()))
+        .collect())
+}
+
+/// `needle` followed by end of line, whitespace or a quote: `~/.ssh/work` but not
+/// `~/.ssh/work2` or `~/.ssh/work.pub`.
+fn mentions(line: &str, needle: &str) -> bool {
+    line.match_indices(needle).any(|(i, _)| {
+        line[i + needle.len()..]
+            .chars()
+            .next()
+            .is_none_or(|c| c.is_whitespace() || c == '"')
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -218,5 +277,38 @@ mod tests {
         assert!(text.starts_with(HEADER));
         assert!(text.contains("Host h\n"));
         assert!(text.contains("IdentitiesOnly yes\n"));
+    }
+
+    #[test]
+    fn sync_conf_writes_or_removes() {
+        let tmp = tempfile::tempdir().unwrap();
+        let d = tmp.path();
+        let p = sync_conf(d, "work", &[dep("h", None, 22, "h")])
+            .unwrap()
+            .unwrap();
+        assert!(p.is_file());
+        assert_eq!(sync_conf(d, "work", &[]).unwrap(), None);
+        assert!(!p.exists());
+        assert!(!remove_conf(d, "work").unwrap(), "already gone");
+        write_conf(d, "work", &[dep("h", None, 22, "h")]).unwrap();
+        assert!(remove_conf(d, "work").unwrap());
+    }
+
+    #[test]
+    fn user_config_mentions_finds_whole_path_words_only() {
+        let tmp = tempfile::tempdir().unwrap();
+        let d = tmp.path();
+        assert!(
+            user_config_mentions(d, "work").unwrap().is_empty(),
+            "no config file"
+        );
+        let text = format!(
+            "Host a\n    IdentityFile {dir}/work\nHost b\n    IdentityFile {dir}/work2\n# IdentityFile {dir}/work\nHost c\n    IdentityFile \"{dir}/work\"\n    IdentityFile ~/.ssh/work\n",
+            dir = d.display()
+        );
+        fs::write(d.join("config"), text).unwrap();
+        let got = user_config_mentions(d, "work").unwrap();
+        let lines: Vec<usize> = got.iter().map(|(n, _)| *n).collect();
+        assert_eq!(lines, vec![2, 7, 8], "{got:?}");
     }
 }
