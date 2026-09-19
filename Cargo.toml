@@ -2,6 +2,7 @@
 name = "ssk"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.88"
 license = "MIT AND BSD-2-Clause"
 description = "High-level SSH identity manager: generate keys, install them on hosts, keep track of both"
 
