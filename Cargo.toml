@@ -1,10 +1,11 @@
 [package]
 name = "ssk"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 rust-version = "1.88"
 license = "MIT AND BSD-2-Clause"
 description = "High-level SSH identity manager: generate keys, install them on hosts, keep track of both"
+repository = "https://github.com/Jezza/ssk"
 
 [dependencies]
 anyhow = "1"
