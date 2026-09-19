@@ -191,7 +191,7 @@ pub fn run_targets(
     Ok(if all_ok { 0 } else { 1 })
 }
 
-/// Probe → install → verify for one host. Only I/O errors from spawning ssh are `Err`;
+/// Probe, install, verify for one host. Only I/O errors from spawning ssh are `Err`;
 /// everything ssh itself reports becomes an `Outcome`.
 pub fn copy_one(
     runner: &dyn SshRunner,

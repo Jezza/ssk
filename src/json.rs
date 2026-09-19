@@ -1,5 +1,5 @@
-//! Serializable views for `--json`. The shapes are documented in the lifecycle spec;
-//! change them there first.
+//! Serializable views for `--json`. Field names and nullability are part of the CLI's
+//! contract; renaming or dropping one is a breaking change.
 
 use std::path::PathBuf;
 

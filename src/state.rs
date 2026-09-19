@@ -1,4 +1,4 @@
-//! `~/.ssh/ssk.toml`: what ssk knows that the key files can't tell it —
+//! `~/.ssh/ssk.toml`: what ssk knows that the key files can't tell it, namely
 //! when an identity was created and where it has been installed.
 
 use std::collections::BTreeMap;

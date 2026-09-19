@@ -104,8 +104,8 @@ pub fn run(settings: &Settings, ui: &Ui, args: &RenameArgs) -> anyhow::Result<u8
     Ok(0)
 }
 
-/// The user's own `config` is never edited, only reported — in `--dry-run` too, where it
-/// is part of knowing what the rename will leave behind.
+/// The user's own `config` is never edited, only reported. That goes for `--dry-run`
+/// too, where it is part of knowing what the rename will leave behind.
 fn warn_about_user_config(ui: &Ui, dir: &Path, old: &str, mentions: &[(usize, String)]) {
     if mentions.is_empty() {
         return;

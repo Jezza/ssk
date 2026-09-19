@@ -1,4 +1,4 @@
-//! "Does this key already log in?" — the same check `ssh-copy-id` performs, plus proof
+//! "Does this key already log in?": the same check `ssh-copy-id` performs, plus proof
 //! that the key *we* asked for is the one the server accepted.
 
 use std::io;
@@ -53,8 +53,8 @@ pub fn invocation(private_key: &Path, target: &Target, extra_options: &[String])
 /// Exit 0 is *not* enough: `IdentitiesOnly=yes` only stops ssh offering agent keys, while
 /// every `IdentityFile` line the ssh config matches for this host is still tried after the
 /// `-i` key. ssk's own `ssk.d/<name>.conf` (Included from `~/.ssh/config`) carries exactly
-/// such a line, so a probe with `-i work.new` can come back 0 because `work` — a different
-/// key entirely — was accepted, and `--force`-less `copy`, `rotate` and `revoke --all`
+/// such a line, so a probe with `-i work.new` can come back 0 because `work`, a different
+/// key entirely, was accepted, and `--force`-less `copy`, `rotate` and `revoke --all`
 /// would all draw the wrong conclusion. So the probe runs at `LogLevel=DEBUG1` and only
 /// believes the key is installed when ssh names it in its `server accepts key:` line,
 /// either by the path we passed to `-i` or by fingerprint. OpenSSH has printed that line
@@ -91,7 +91,7 @@ fn accepted(stderr: &str, key_path: &Path, fingerprint: &str) -> bool {
 
 /// ssh runs at `LogLevel=DEBUG1` so it can name the accepted key (see `accepted` above),
 /// which fills stderr with `debug1: ...` chatter that isn't fit to show a user. Report the
-/// last non-empty, non-`debugN:` line instead — the actual failure ssh printed — falling
+/// last non-empty, non-`debugN:` line instead (the actual failure ssh printed), falling
 /// back to the whole trimmed stderr if every line is debug output (or there is none).
 fn error_message(stderr: &str) -> String {
     let trimmed = stderr.trim();

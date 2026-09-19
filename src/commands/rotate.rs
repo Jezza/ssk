@@ -36,7 +36,7 @@ fn target_of(d: &Deployment) -> Target {
     }
 }
 
-/// Spec step 2: put `new` on every deployment, logging in with `old`. Every host is
+/// Step 2: put `new` on every deployment, logging in with `old`. Every host is
 /// attempted; the caller decides what a failure means.
 pub fn install_everywhere(
     runner: &dyn SshRunner,
@@ -65,7 +65,7 @@ pub fn install_everywhere(
     Ok(out)
 }
 
-/// Spec step 3: remove `old` from every deployment, logging in with `new`.
+/// Step 3: remove `old` from every deployment, logging in with `new`.
 pub fn revoke_everywhere(
     runner: &dyn SshRunner,
     ui: &Ui,
@@ -93,7 +93,7 @@ pub fn revoke_everywhere(
     Ok(out)
 }
 
-/// Spec step 4: `<name>` -> `<name>.old`, `<name>.new` -> `<name>`; `created` and every
+/// Step 4: `<name>` -> `<name>.old`, `<name>.new` -> `<name>`; `created` and every
 /// `installed` become `now`. `lingering` are deployments where the old key is still
 /// accepted: then the `.old` pair is kept and recorded under `<name>.old`; otherwise it
 /// is deleted.
