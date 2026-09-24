@@ -64,6 +64,10 @@ pub struct New {
     /// After creating, install the key on TARGET ([user@]host[:port]); repeatable
     #[arg(long, value_name = "TARGET", action = clap::ArgAction::Append)]
     pub copy: Vec<String>,
+
+    /// Extra ssh option for --copy, passed through as -o (repeatable), e.g. ProxyJump=bastion
+    #[arg(short = 'o', long = "ssh-option", value_name = "K=V", action = clap::ArgAction::Append, requires = "copy")]
+    pub ssh_option: Vec<String>,
 }
 
 pub fn handle(settings: &Settings, ui: &Ui, args: &New) -> anyhow::Result<u8> {
@@ -152,6 +156,7 @@ pub fn handle(settings: &Settings, ui: &Ui, args: &New) -> anyhow::Result<u8> {
             &identity,
             &targets,
             &CopyOptions {
+                ssh_options: args.ssh_option.clone(),
                 write_config: settings.write_ssh_config,
                 ..Default::default()
             },

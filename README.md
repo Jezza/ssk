@@ -71,8 +71,8 @@ ok jezza@dev.example.com: installed and verified
 Targets are `[user@]host[:port]`, or a `Host` alias from your own ssh config.
 `-l` and `-p` set defaults for targets that leave the user or port out, and
 `-o ProxyJump=bastion` style options are passed through to ssh. `ssk new`
-takes `--copy TARGET` too, for the common case of creating a key and
-installing it in one go.
+takes `--copy TARGET` (and `-o` for it) too, for the common case of creating
+a key and installing it in one go.
 
 Then ask what you have.
 
@@ -253,7 +253,9 @@ does not matter, and both handle OpenWrt's dropbear path and SELinux
 relabelling the way `ssh-copy-id` does. Both steps pass `IdentitiesOnly=yes`
 so that an agent holding many keys does not burn through `MaxAuthTries`
 before the password prompt; `-o IdentitiesOnly=no` on the command line
-overrides that.
+overrides that. If the install login is refused anyway (typically a host with
+passwords off whose only working key lives in ssh-agent), `copy` retries it
+once with agent keys allowed, unless `-o` already set `IdentitiesOnly`.
 
 ## Licence
 

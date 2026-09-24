@@ -5,7 +5,7 @@ use std::io;
 use std::path::Path;
 
 use super::runner::{SshInvocation, SshOutput, SshRunner};
-use super::{identities_only, target_args};
+use super::target_args;
 use crate::target::Target;
 
 /// The snippet as vendored, comments included. See `install_snippet.sh` for provenance.
@@ -29,13 +29,16 @@ pub fn remote_command() -> String {
 
 /// ssh argv for the install step. Any auth that works (a config key, a default key, a
 /// password) is fine for getting the new key on; `IdentitiesOnly=yes` only stops ssh
-/// burning `MaxAuthTries` on agent keys first (see [`identities_only`]). `auth_key` adds
-/// one `-i` to try first; `rotate` passes the current key.
+/// burning `MaxAuthTries` on agent keys first (see [`super::identities_only`]). `auth_key` adds
+/// one `-i` to try first; `rotate` passes the current key. `identities_only: false` drops
+/// the option so agent keys are offered too; `copy` retries that way when the first
+/// attempt could not log in.
 pub fn invocation(
     target: &Target,
     extra_options: &[String],
     public_key_line: &str,
     auth_key: Option<&Path>,
+    identities_only: bool,
 ) -> SshInvocation {
     let mut args = vec!["-o".to_string(), "ControlPath=none".to_string()];
     if let Some(k) = auth_key {
@@ -43,7 +46,9 @@ pub fn invocation(
         args.push(k.display().to_string());
     }
     args.extend(target_args(target, extra_options));
-    args.extend(identities_only());
+    if identities_only {
+        args.extend(super::identities_only());
+    }
     args.push("--".to_string());
     args.push(target.host.clone());
     args.push(remote_command());
@@ -66,12 +71,14 @@ pub fn install(
     extra_options: &[String],
     public_key_line: &str,
     auth_key: Option<&Path>,
+    identities_only: bool,
 ) -> io::Result<InstallResult> {
     let out: SshOutput = runner.run(&invocation(
         target,
         extra_options,
         public_key_line,
         auth_key,
+        identities_only,
     ))?;
     Ok(if out.success() {
         InstallResult::Installed
@@ -124,6 +131,7 @@ mod tests {
             &["ProxyJump=b".to_string()],
             "ssh-ed25519 AAAA c\n",
             None,
+            true,
         );
         let expected: Vec<String> = [
             "-o",
@@ -162,11 +170,11 @@ mod tests {
             },
         ]);
         assert_eq!(
-            install(&ssh, &t, &[], "k", None).unwrap(),
+            install(&ssh, &t, &[], "k", None, true).unwrap(),
             InstallResult::Installed
         );
         assert_eq!(
-            install(&ssh, &t, &[], "k", None).unwrap(),
+            install(&ssh, &t, &[], "k", None, true).unwrap(),
             InstallResult::Failed { code: Some(255) }
         );
     }
@@ -178,9 +186,20 @@ mod tests {
             host: "h".into(),
             port: None,
         };
-        let inv = invocation(&t, &[], "k", Some(Path::new("/k/old")));
+        let inv = invocation(&t, &[], "k", Some(Path::new("/k/old")), true);
         assert_eq!(&inv.args[..4], &["-o", "ControlPath=none", "-i", "/k/old"]);
         assert!(inv.args.iter().any(|a| a == "IdentitiesOnly=yes"));
+    }
+
+    #[test]
+    fn identities_only_false_leaves_the_option_out() {
+        let t = Target {
+            user: None,
+            host: "h".into(),
+            port: None,
+        };
+        let inv = invocation(&t, &[], "k", None, false);
+        assert!(!inv.args.iter().any(|a| a.starts_with("IdentitiesOnly")));
     }
 
     /// ssh keeps the first value it sees for an option, so ours must come after the user's.
@@ -191,7 +210,7 @@ mod tests {
             host: "h".into(),
             port: None,
         };
-        let inv = invocation(&t, &["IdentitiesOnly=no".to_string()], "k", None);
+        let inv = invocation(&t, &["IdentitiesOnly=no".to_string()], "k", None, true);
         let at = |v: &str| {
             inv.args
                 .iter()

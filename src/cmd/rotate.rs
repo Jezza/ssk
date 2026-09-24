@@ -470,8 +470,13 @@ fn describe_dry_run(
         let target = target_of(d);
         ui.info(format!("{target}: would run"));
         let probe_new = probe::invocation(&new_key, &target, ssh_options);
-        let install_new =
-            install::invocation(&target, ssh_options, &new_line, Some(&old.private_path));
+        let install_new = install::invocation(
+            &target,
+            ssh_options,
+            &new_line,
+            Some(&old.private_path),
+            true,
+        );
         let revoke_old = revoke::invocation(&new_key, &target, ssh_options, &old_line);
         let probe_old = probe::invocation(&old.private_path, &target, ssh_options);
         ui.info(format!("  ssh {}", shell_join(&probe_new.args)));

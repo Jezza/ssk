@@ -258,13 +258,29 @@ pub fn copy_one(
         "{target}: installing '{}' (ssh may ask for your password)",
         identity.name
     ));
-    if let install::InstallResult::Failed { code } = install::install(
-        runner,
-        target,
-        &opts.ssh_options,
-        public_line,
-        opts.auth_key.as_deref(),
-    )? {
+    let install_with = |identities_only| {
+        install::install(
+            runner,
+            target,
+            &opts.ssh_options,
+            public_line,
+            opts.auth_key.as_deref(),
+            identities_only,
+        )
+    };
+    let mut result = install_with(true)?;
+    // 255 is ssh's own failure, and the probe just reached the host, so this is almost
+    // always a refused login: the only key that works may be one that lives in ssh-agent
+    // alone, which IdentitiesOnly=yes stops ssh offering. Try once more with agent keys.
+    if result == (install::InstallResult::Failed { code: Some(255) })
+        && !sets_identities_only(&opts.ssh_options)
+    {
+        ui.info(format!(
+            "{target}: login refused; retrying with ssh-agent keys allowed"
+        ));
+        result = install_with(false)?;
+    }
+    if let install::InstallResult::Failed { code } = result {
         let status = code
             .map(|c| c.to_string())
             .unwrap_or_else(|| "a signal".to_string());
@@ -289,6 +305,16 @@ pub fn copy_one(
     )
 }
 
+/// The user already chose, with `-o IdentitiesOnly=...` (ssh also takes `K V`).
+fn sets_identities_only(ssh_options: &[String]) -> bool {
+    ssh_options.iter().any(|o| {
+        o.trim_start()
+            .split(['=', ' ', '\t'])
+            .next()
+            .is_some_and(|k| k.eq_ignore_ascii_case("IdentitiesOnly"))
+    })
+}
+
 fn describe_dry_run(
     ui: &Ui,
     ssh_dir: &Path,
@@ -303,6 +329,7 @@ fn describe_dry_run(
         &opts.ssh_options,
         public_line,
         opts.auth_key.as_deref(),
+        true,
     );
     ui.info(format!("{target}: would run"));
     ui.info(format!("  ssh {}", shell_join(&probe_inv.args)));
@@ -466,12 +493,12 @@ mod tests {
         let ssh = FakeSsh::new(vec![
             denied(),
             SshOutput {
-                code: Some(255),
+                code: Some(1),
                 ..Default::default()
             },
         ]);
         let out = copy_one(&ssh, &Ui::silent(), &id, &t(), &CopyOptions::default(), "k").unwrap();
-        assert!(matches!(out, Outcome::Failed(ref m) if m.contains("255")));
+        assert!(matches!(out, Outcome::Failed(ref m) if m.contains("exited with 1")));
     }
 
     #[test]
