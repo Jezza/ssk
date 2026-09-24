@@ -5,7 +5,7 @@ use std::fs;
 
 use anyhow::Context;
 
-use crate::cli::RmArgs;
+use crate::cli::DeleteArgs;
 use crate::identity::store;
 use crate::identity::{Identity, name};
 use crate::settings::Settings;
@@ -13,7 +13,7 @@ use crate::ssh::{agent, config};
 use crate::state::State;
 use crate::ui::Ui;
 
-pub fn run(settings: &Settings, ui: &Ui, args: &RmArgs) -> anyhow::Result<u8> {
+pub fn run(settings: &Settings, ui: &Ui, args: &DeleteArgs) -> anyhow::Result<u8> {
     name::validate(&args.identity)?;
     let dir = &settings.ssh_dir;
     let name = &args.identity;

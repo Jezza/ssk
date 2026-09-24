@@ -65,11 +65,13 @@ pub enum Command {
     /// Show one identity in detail
     Show(ShowArgs),
     /// Find (and fix) hygiene problems in the ssh directory
+    #[command(alias = "doc")]
     Doctor(DoctorArgs),
     /// Load identities into ssh-agent
     Add(AddArgs),
     /// Delete an identity from this machine
-    Rm(RmArgs),
+    #[command(alias = "rm", alias = "remove")]
+    Delete(DeleteArgs),
     /// Rename an identity; state and generated ssh config follow
     Rename(RenameArgs),
     /// Remove an identity's public key from hosts
@@ -96,7 +98,7 @@ impl Command {
             Command::Show(_) => "show",
             Command::Doctor(_) => "doctor",
             Command::Add(_) => "add",
-            Command::Rm(_) => "rm",
+            Command::Delete(_) => "rm",
             Command::Rename(_) => "rename",
             Command::Revoke(_) => "revoke",
             Command::Config(_) => "config",
@@ -241,7 +243,7 @@ pub struct AddArgs {
 }
 
 #[derive(Args, Debug)]
-pub struct RmArgs {
+pub struct DeleteArgs {
     /// Identity to delete
     pub identity: String,
 

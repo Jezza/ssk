@@ -45,7 +45,7 @@ fn main() -> ExitCode {
         Command::Show(args) => commands::show::run(&settings, &ui, args),
         Command::Doctor(args) => commands::doctor::run(&settings, &ui, args),
         Command::Add(args) => commands::add::run(&settings, &ui, args),
-        Command::Rm(args) => commands::rm::run(&settings, &ui, args),
+        Command::Delete(args) => commands::rm::run(&settings, &ui, args),
         Command::Rename(args) => commands::rename::run(&settings, &ui, args),
         Command::Revoke(args) => commands::revoke::run(&settings, &ui, args),
         Command::Config(args) => commands::config::run(&settings, &ui, args),
