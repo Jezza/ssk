@@ -6,14 +6,22 @@ use std::path::Path;
 
 use anyhow::{Context, bail};
 
-use crate::cli::RenameArgs;
 use crate::identity::{name, store};
 use crate::settings::Settings;
 use crate::ssh::config;
 use crate::state::State;
 use crate::ui::Ui;
 
-pub fn run(settings: &Settings, ui: &Ui, args: &RenameArgs) -> anyhow::Result<u8> {
+#[derive(clap::Parser, Debug)]
+pub struct Rename {
+    /// Current name
+    pub old: String,
+
+    /// New name
+    pub new: String,
+}
+
+pub fn handle(settings: &Settings, ui: &Ui, args: &Rename) -> anyhow::Result<u8> {
     name::validate(&args.old)?;
     name::validate(&args.new)?;
     let dir = &settings.ssh_dir;

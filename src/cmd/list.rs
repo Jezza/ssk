@@ -10,6 +10,9 @@ use crate::ssh::agent::{self, AgentStatus};
 use crate::state::State;
 use crate::ui::Ui;
 
+#[derive(clap::Parser, Debug)]
+pub struct List {}
+
 #[derive(Tabled, Debug, Clone, PartialEq, Eq)]
 pub struct Row {
     #[tabled(rename = "NAME")]
@@ -108,7 +111,7 @@ pub fn build_rows(entries: &[Entry], state: &State, agent: &AgentStatus) -> Vec<
         .collect()
 }
 
-pub fn run(settings: &Settings, ui: &Ui) -> anyhow::Result<u8> {
+pub fn handle(settings: &Settings, ui: &Ui, _args: &List) -> anyhow::Result<u8> {
     let entries = store::scan(&settings.ssh_dir)?;
     let state = State::load(&settings.ssh_dir)?;
     let agent = agent::status();

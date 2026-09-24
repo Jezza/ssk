@@ -6,7 +6,7 @@ use std::io::{self, IsTerminal};
 use anyhow::bail;
 use owo_colors::{OwoColorize, Stream};
 
-use crate::cli::ColorChoice;
+use crate::args::ColorChoice;
 use crate::settings::Settings;
 
 pub struct Ui {

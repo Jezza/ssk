@@ -3,7 +3,6 @@
 use std::fmt::Write as _;
 use std::path::Path;
 
-use crate::cli::ShowArgs;
 use crate::fsx;
 use crate::identity::Identity;
 use crate::identity::store;
@@ -13,7 +12,21 @@ use crate::ssh::agent::{self, AgentStatus};
 use crate::state::State;
 use crate::ui::Ui;
 
-pub fn run(settings: &Settings, ui: &Ui, args: &ShowArgs) -> anyhow::Result<u8> {
+#[derive(clap::Parser, Debug)]
+pub struct Show {
+    /// Identity to show
+    pub identity: String,
+
+    /// Print only the public key line
+    #[arg(short = 'p', long = "pub")]
+    pub pub_only: bool,
+
+    /// Print only the SHA256 fingerprint
+    #[arg(long, conflicts_with = "pub_only")]
+    pub fingerprint: bool,
+}
+
+pub fn handle(settings: &Settings, ui: &Ui, args: &Show) -> anyhow::Result<u8> {
     let id = store::resolve(&settings.ssh_dir, &args.identity)?;
     if settings.json {
         let state = State::load(&settings.ssh_dir)?;

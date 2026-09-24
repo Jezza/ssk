@@ -1,8 +1,7 @@
 use std::process::ExitCode;
 
-use clap::Parser;
-use ssk::cli::{Cli, Command, ConfigAction};
-use ssk::commands;
+use ssk::args::{self, Command};
+use ssk::cmd;
 use ssk::settings::Settings;
 use ssk::ui::Ui;
 
@@ -10,22 +9,22 @@ use ssk::ui::Ui;
 /// load, or a typo in it could only be fixed by hand. `config get` still fails fast:
 /// it is there to report the effective values, which a broken file does not have.
 fn repairs_the_config(command: &Command) -> bool {
-    matches!(command, Command::Config(args) if !matches!(args.action, ConfigAction::Get { .. }))
+    matches!(command, Command::Config(config) if !matches!(config.cmd, cmd::config::Cmd::Get(_)))
 }
 
 fn main() -> ExitCode {
-    let cli = Cli::parse();
-    if cli.json && !cli.command.supports_json() {
+    let args::Args { ctx, command } = clap::Parser::parse();
+    if ctx.json && !command.supports_json() {
         eprintln!(
             "error: --json is not supported by `ssk {}` (list, show, doctor, hosts, config get)",
-            cli.command.name()
+            command.name()
         );
         return ExitCode::from(2);
     }
-    let loaded = if repairs_the_config(&cli.command) {
-        Settings::from_cli_lenient(&cli)
+    let loaded = if repairs_the_config(&command) {
+        Settings::from_ctx_lenient(&ctx)
     } else {
-        Settings::from_cli(&cli).map(|s| (s, None))
+        Settings::from_ctx(&ctx).map(|s| (s, None))
     };
     let (settings, problem) = match loaded {
         Ok(pair) => pair,
@@ -38,20 +37,20 @@ fn main() -> ExitCode {
     if let Some(err) = problem {
         ui.warn(format!("{err:#}"));
     }
-    let result = match &cli.command {
-        Command::New(args) => commands::new::run(&settings, &ui, args),
-        Command::Copy(args) => commands::copy::run(&settings, &ui, args),
-        Command::List => commands::list::run(&settings, &ui),
-        Command::Show(args) => commands::show::run(&settings, &ui, args),
-        Command::Doctor(args) => commands::doctor::run(&settings, &ui, args),
-        Command::Add(args) => commands::add::run(&settings, &ui, args),
-        Command::Delete(args) => commands::rm::run(&settings, &ui, args),
-        Command::Rename(args) => commands::rename::run(&settings, &ui, args),
-        Command::Revoke(args) => commands::revoke::run(&settings, &ui, args),
-        Command::Config(args) => commands::config::run(&settings, &ui, args),
-        Command::Rotate(args) => commands::rotate::run(&settings, &ui, args),
-        Command::Hosts => commands::hosts::run(&settings, &ui),
-        Command::Completions { shell } => commands::completions::run(*shell),
+    let result = match &command {
+        Command::New(args) => cmd::new::handle(&settings, &ui, args),
+        Command::Copy(args) => cmd::copy::handle(&settings, &ui, args),
+        Command::List(args) => cmd::list::handle(&settings, &ui, args),
+        Command::Show(args) => cmd::show::handle(&settings, &ui, args),
+        Command::Doctor(args) => cmd::doctor::handle(&settings, &ui, args),
+        Command::Add(args) => cmd::add::handle(&settings, &ui, args),
+        Command::Delete(args) => cmd::delete::handle(&settings, &ui, args),
+        Command::Rename(args) => cmd::rename::handle(&settings, &ui, args),
+        Command::Revoke(args) => cmd::revoke::handle(&settings, &ui, args),
+        Command::Config(args) => cmd::config::handle(&settings, &ui, args),
+        Command::Rotate(args) => cmd::rotate::handle(&settings, &ui, args),
+        Command::Hosts(args) => cmd::hosts::handle(&settings, &ui, args),
+        Command::Completions(args) => cmd::completions::handle(args),
     };
     match result {
         Ok(code) => ExitCode::from(code),

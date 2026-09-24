@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use anyhow::Context;
 use serde::Serialize;
 
-use crate::cli::{Cli, ColorChoice};
+use crate::args::{ColorChoice, Ctx};
 use crate::config_file::{self, FileConfig};
 use crate::identity::keygen::{self, KeyType};
 
@@ -109,23 +109,23 @@ pub struct Settings {
 }
 
 impl Settings {
-    pub fn from_cli(cli: &Cli) -> anyhow::Result<Self> {
-        let (settings, problem) = Self::load(cli)?;
+    pub fn from_ctx(ctx: &Ctx) -> anyhow::Result<Self> {
+        let (settings, problem) = Self::load(ctx)?;
         match problem {
             Some(err) => Err(err),
             None => Ok(settings),
         }
     }
 
-    /// `from_cli`, except that a config file which cannot be read or parsed is *reported*
+    /// `from_ctx`, except that a config file which cannot be read or parsed is *reported*
     /// rather than fatal: the settings come back built on defaults for the file's keys,
     /// with the error beside them. `ssk config path|edit|set|unset` use this, so a broken
     /// config file can still be repaired with ssk itself.
-    pub fn from_cli_lenient(cli: &Cli) -> anyhow::Result<(Self, Option<anyhow::Error>)> {
-        Self::load(cli)
+    pub fn from_ctx_lenient(ctx: &Ctx) -> anyhow::Result<(Self, Option<anyhow::Error>)> {
+        Self::load(ctx)
     }
 
-    fn load(cli: &Cli) -> anyhow::Result<(Self, Option<anyhow::Error>)> {
+    fn load(ctx: &Ctx) -> anyhow::Result<(Self, Option<anyhow::Error>)> {
         let config_path = config_file::path();
         let (file, problem) = match &config_path {
             Some(p) => match config_file::load(p) {
@@ -136,22 +136,22 @@ impl Settings {
         };
         let env = EnvConfig::from_env()?;
         Ok((
-            Self::resolve(cli, &env, &file, config_path, home_dir())?,
+            Self::resolve(ctx, &env, &file, config_path, home_dir())?,
             problem,
         ))
     }
 
     /// flag > env > file > default, per key. clap has already merged `SSK_SSH_DIR` into
-    /// `cli.ssh_dir`; `env.ssh_dir` tells us whether that is where it came from.
+    /// `ctx.ssh_dir`; `env.ssh_dir` tells us whether that is where it came from.
     pub fn resolve(
-        cli: &Cli,
+        ctx: &Ctx,
         env: &EnvConfig,
         file: &FileConfig,
         config_path: Option<PathBuf>,
         home: Option<PathBuf>,
     ) -> anyhow::Result<Self> {
         let mut sources = BTreeMap::new();
-        let ssh_dir = match (&cli.ssh_dir, &file.ssh_dir) {
+        let ssh_dir = match (&ctx.ssh_dir, &file.ssh_dir) {
             (Some(d), _) => {
                 let src = if env.ssh_dir.as_ref() == Some(d) {
                     Source::Env
@@ -214,12 +214,12 @@ impl Settings {
         );
         Ok(Settings {
             ssh_dir,
-            yes: cli.yes,
-            dry_run: cli.dry_run,
-            quiet: cli.quiet,
-            verbose: cli.verbose,
-            color: cli.color,
-            json: cli.json,
+            yes: ctx.yes,
+            dry_run: ctx.dry_run,
+            quiet: ctx.quiet,
+            verbose: ctx.verbose,
+            color: ctx.color,
+            json: ctx.json,
             comment_template,
             default_type,
             rsa_bits,
@@ -280,10 +280,13 @@ pub fn default_ssh_dir() -> anyhow::Result<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::args::Args;
     use clap::Parser;
 
-    fn parse(args: &[&str]) -> Cli {
-        Cli::try_parse_from(std::iter::once("ssk").chain(args.iter().copied())).unwrap()
+    fn parse(args: &[&str]) -> Ctx {
+        Args::try_parse_from(std::iter::once("ssk").chain(args.iter().copied()))
+            .unwrap()
+            .ctx
     }
 
     fn resolve(args: &[&str], env: EnvConfig, file: FileConfig) -> Settings {
@@ -415,7 +418,7 @@ mod tests {
             FileConfig::default(),
         );
         assert_eq!(s.verbose, 2);
-        assert!(Cli::try_parse_from(["ssk", "-q", "-v", "list"]).is_err());
+        assert!(Args::try_parse_from(["ssk", "-q", "-v", "list"]).is_err());
     }
 
     #[test]

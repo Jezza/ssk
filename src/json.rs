@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use serde::Serialize;
 
-use crate::commands::doctor::{Finding, Severity};
+use crate::cmd::doctor::{Finding, Severity};
 use crate::identity::Identity;
 use crate::identity::store::Entry;
 use crate::ssh::agent::{self, AgentStatus};
@@ -263,12 +263,12 @@ mod tests {
 
     #[test]
     fn doctor_and_host_shapes() {
-        let f = crate::commands::doctor::Finding {
+        let f = crate::cmd::doctor::Finding {
             id: "key-perms",
-            severity: crate::commands::doctor::Severity::Warn,
+            severity: crate::cmd::doctor::Severity::Warn,
             path: "/s/work".into(),
             message: "m".into(),
-            fix: Some(crate::commands::doctor::Fix::Chmod(0o600)),
+            fix: Some(crate::cmd::doctor::Fix::Chmod(0o600)),
         };
         let v = serde_json::to_value(DoctorJson {
             findings: vec![FindingJson::from(&f)],

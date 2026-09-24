@@ -8,9 +8,8 @@ use std::path::Path;
 
 use anyhow::{Context, bail};
 
-use crate::cli::RotateArgs;
-use crate::commands::copy::{self, CopyOptions};
-use crate::commands::{new, revoke as revoke_cmd};
+use crate::cmd::copy::{self, CopyOptions};
+use crate::cmd::{new, revoke as revoke_cmd};
 use crate::identity::keygen::{self, KeySpec, KeyType};
 use crate::identity::{Identity, comment, store};
 use crate::settings::Settings;
@@ -19,6 +18,55 @@ use crate::ssh::{agent, install, probe, revoke};
 use crate::state::{self, Deployment, State};
 use crate::target::Target;
 use crate::ui::{Ui, shell_join};
+
+#[derive(clap::Parser, Debug)]
+#[command(group = clap::ArgGroup::new("pass").args(["passphrase", "no_passphrase", "passphrase_stdin"]))]
+pub struct Rotate {
+    /// Identity to rotate
+    pub identity: String,
+
+    /// Comment for the new key [default: the current key's comment]
+    #[arg(short = 'c', long, visible_short_alias = 'C', value_name = "TEXT")]
+    pub comment: Option<String>,
+
+    /// Key type for the new key [default: same as the current key]
+    #[arg(
+        short = 't',
+        long = "type",
+        alias = "algo",
+        value_enum,
+        value_name = "ALGO"
+    )]
+    pub key_type: Option<KeyType>,
+
+    /// Key size for the new key [default: same as the current key]
+    #[arg(short = 'b', long, value_name = "N")]
+    pub bits: Option<u32>,
+
+    /// Set the new key's passphrase non-interactively. Visible in `ps` and shell history
+    #[arg(short = 'N', long, value_name = "TEXT")]
+    pub passphrase: Option<String>,
+
+    /// Create the new key without a passphrase
+    #[arg(long)]
+    pub no_passphrase: bool,
+
+    /// Read the new key's passphrase from the first line of stdin
+    #[arg(long)]
+    pub passphrase_stdin: bool,
+
+    /// Load the new key into ssh-agent as soon as it exists
+    #[arg(short = 'a', long)]
+    pub add: bool,
+
+    /// Don't load the new key into ssh-agent, even if add_to_agent is set
+    #[arg(long, conflicts_with = "add")]
+    pub no_add: bool,
+
+    /// Extra ssh option for every ssh call, passed through as -o (repeatable)
+    #[arg(short = 'o', long = "ssh-option", value_name = "K=V", action = clap::ArgAction::Append)]
+    pub ssh_option: Vec<String>,
+}
 
 pub fn new_name(name: &str) -> String {
     format!("{name}.new")
@@ -148,7 +196,7 @@ pub fn swap(ssh_dir: &Path, name: &str, lingering: &[Deployment], now: &str) -> 
     Ok(())
 }
 
-pub fn run(settings: &Settings, ui: &Ui, args: &RotateArgs) -> anyhow::Result<u8> {
+pub fn handle(settings: &Settings, ui: &Ui, args: &Rotate) -> anyhow::Result<u8> {
     let dir = &settings.ssh_dir;
     let old = store::resolve(dir, &args.identity)?;
     old.public_key_line()?;

@@ -8,7 +8,6 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Context;
 
-use crate::cli::DoctorArgs;
 use crate::fsx;
 use crate::identity::IdentityError;
 use crate::identity::store::{self, Entry};
@@ -17,6 +16,13 @@ use crate::settings::Settings;
 use crate::ssh::config;
 use crate::state::State;
 use crate::ui::Ui;
+
+#[derive(clap::Parser, Debug)]
+pub struct Doctor {
+    /// Apply the safe fixes (tighten permissions, regenerate .pub, add the Include line)
+    #[arg(long)]
+    pub fix: bool,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Severity {
@@ -326,7 +332,7 @@ fn print_findings(ui: &Ui, ssh_dir: &Path, findings: &[Finding]) {
     }
 }
 
-pub fn run(settings: &Settings, ui: &Ui, args: &DoctorArgs) -> anyhow::Result<u8> {
+pub fn handle(settings: &Settings, ui: &Ui, args: &Doctor) -> anyhow::Result<u8> {
     let dir = &settings.ssh_dir;
     let findings = check(dir)?;
     let fixable: Vec<Finding> = findings

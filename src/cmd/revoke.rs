@@ -6,8 +6,7 @@ use std::path::Path;
 
 use anyhow::{Context, bail};
 
-use crate::cli::RevokeArgs;
-use crate::commands::copy;
+use crate::cmd::copy;
 use crate::identity::Identity;
 use crate::identity::store;
 use crate::settings::Settings;
@@ -18,6 +17,33 @@ use crate::ssh::{agent, config};
 use crate::state::State;
 use crate::target::Target;
 use crate::ui::{Ui, shell_join};
+
+#[derive(clap::Parser, Debug)]
+#[command(group = clap::ArgGroup::new("where").args(["targets", "all"]).required(true))]
+pub struct Revoke {
+    /// Identity whose public key to remove
+    pub identity: String,
+
+    /// [user@]host[:port]
+    #[arg(value_name = "TARGET")]
+    pub targets: Vec<String>,
+
+    /// Every host recorded for this identity in ssk.toml
+    #[arg(long)]
+    pub all: bool,
+
+    /// Default port for targets that don't specify one
+    #[arg(short = 'p', long, value_name = "N")]
+    pub port: Option<u16>,
+
+    /// Default user for targets that don't specify one
+    #[arg(short = 'l', long, value_name = "USER")]
+    pub login: Option<String>,
+
+    /// Extra ssh option, passed through as -o (repeatable)
+    #[arg(short = 'o', long = "ssh-option", value_name = "K=V", action = clap::ArgAction::Append)]
+    pub ssh_option: Vec<String>,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Outcome {
@@ -79,7 +105,7 @@ pub fn recorded_targets(state: &State, name: &str) -> Vec<Target> {
         .collect()
 }
 
-pub fn run(settings: &Settings, ui: &Ui, args: &RevokeArgs) -> anyhow::Result<u8> {
+pub fn handle(settings: &Settings, ui: &Ui, args: &Revoke) -> anyhow::Result<u8> {
     let identity = store::resolve(&settings.ssh_dir, &args.identity)?;
     let targets = if args.all {
         let st = State::load(&settings.ssh_dir)?;

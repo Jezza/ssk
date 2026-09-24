@@ -5,8 +5,7 @@ use std::io::{self, IsTerminal};
 use anyhow::{Context, bail};
 use zeroize::Zeroizing;
 
-use crate::cli::NewArgs;
-use crate::commands::copy::{self, CopyOptions};
+use crate::cmd::copy::{self, CopyOptions};
 use crate::identity::keygen::{self, KeySpec, KeyType};
 use crate::identity::{Identity, comment, name};
 use crate::settings::Settings;
@@ -14,7 +13,60 @@ use crate::ssh::agent;
 use crate::state::{self, State};
 use crate::ui::Ui;
 
-pub fn run(settings: &Settings, ui: &Ui, args: &NewArgs) -> anyhow::Result<u8> {
+#[derive(clap::Parser, Debug)]
+#[command(group = clap::ArgGroup::new("pass").args(["passphrase", "no_passphrase", "passphrase_stdin"]))]
+pub struct New {
+    /// Identity name; becomes the filename under the ssh directory
+    pub identity: String,
+
+    /// Key comment [default: {identity}@{hostname}]
+    #[arg(short = 'c', long, visible_short_alias = 'C', value_name = "TEXT")]
+    pub comment: Option<String>,
+
+    /// Key type [default: ed25519, or default_type from the config file]
+    #[arg(
+        short = 't',
+        long = "type",
+        alias = "algo",
+        value_enum,
+        value_name = "ALGO"
+    )]
+    pub key_type: Option<KeyType>,
+
+    /// Key size. rsa: 2048|3072|4096 (default 4096). ecdsa: 256|384|521 (default 256). Not valid for ed25519
+    #[arg(short = 'b', long, value_name = "N")]
+    pub bits: Option<u32>,
+
+    /// Set the passphrase non-interactively. Visible in `ps` and shell history; scripts only
+    #[arg(short = 'N', long, value_name = "TEXT")]
+    pub passphrase: Option<String>,
+
+    /// Create the key without a passphrase
+    #[arg(long)]
+    pub no_passphrase: bool,
+
+    /// Read the passphrase from the first line of stdin
+    #[arg(long)]
+    pub passphrase_stdin: bool,
+
+    /// Add the new key to ssh-agent
+    #[arg(short = 'a', long)]
+    pub add: bool,
+
+    /// Don't add the key to ssh-agent, even if add_to_agent is set in the config file
+    #[arg(long, conflicts_with = "add")]
+    pub no_add: bool,
+
+    /// Overwrite an existing identity of the same name
+    #[arg(short = 'f', long)]
+    pub force: bool,
+
+    /// After creating, install the key on TARGET ([user@]host[:port]); repeatable
+    #[arg(long, value_name = "TARGET", action = clap::ArgAction::Append)]
+    pub copy: Vec<String>,
+}
+
+pub fn handle(settings: &Settings, ui: &Ui, args: &New) -> anyhow::Result<u8> {
     name::validate(&args.identity)?;
     let private_path = settings.ssh_dir.join(&args.identity);
     let public_path = settings.ssh_dir.join(format!("{}.pub", args.identity));

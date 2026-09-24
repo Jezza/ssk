@@ -5,7 +5,6 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, bail};
 
-use crate::cli::CopyArgs;
 use crate::identity::Identity;
 use crate::identity::store;
 use crate::settings::Settings;
@@ -14,6 +13,44 @@ use crate::ssh::{agent, config, install, probe};
 use crate::state::{self, Deployment, State};
 use crate::target::{self, Target};
 use crate::ui::{Ui, shell_join};
+
+#[derive(clap::Parser, Debug)]
+pub struct Copy {
+    /// Identity whose public key to install
+    pub identity: String,
+
+    /// [user@]host[:port], or a Host alias from your ssh config
+    #[arg(required = true, value_name = "TARGET")]
+    pub targets: Vec<String>,
+
+    /// Default port for targets that don't specify one
+    #[arg(short = 'p', long, value_name = "N")]
+    pub port: Option<u16>,
+
+    /// Default user for targets that don't specify one
+    #[arg(short = 'l', long, value_name = "USER")]
+    pub login: Option<String>,
+
+    /// Extra ssh option, passed through as -o (repeatable), e.g. ProxyJump=bastion
+    #[arg(short = 'o', long = "ssh-option", value_name = "K=V", action = clap::ArgAction::Append)]
+    pub ssh_option: Vec<String>,
+
+    /// Host alias to write into ssh config (default: the host as typed). Needs exactly one target
+    #[arg(long, value_name = "NAME")]
+    pub alias: Option<String>,
+
+    /// Don't write a Host block to ssh config
+    #[arg(long)]
+    pub no_config: bool,
+
+    /// Write the Host block even if write_ssh_config is false in the config file
+    #[arg(long, conflicts_with = "no_config")]
+    pub write_config: bool,
+
+    /// Install even if the key already authenticates
+    #[arg(short = 'f', long)]
+    pub force: bool,
+}
 
 #[derive(Debug, Clone)]
 pub struct CopyOptions {
@@ -39,7 +76,7 @@ impl Default for CopyOptions {
 
 impl CopyOptions {
     /// Flags win; when neither `--write-config` nor `--no-config` is given the setting decides.
-    pub fn from_args(a: &CopyArgs, settings: &Settings) -> Self {
+    pub fn from_args(a: &Copy, settings: &Settings) -> Self {
         CopyOptions {
             ssh_options: a.ssh_option.clone(),
             alias: a.alias.clone(),
@@ -104,7 +141,7 @@ pub fn runner_for(settings: &Settings) -> anyhow::Result<Option<Box<dyn SshRunne
     Ok(Some(Box::new(RealSsh::locate(settings.verbose)?)))
 }
 
-pub fn run(settings: &Settings, ui: &Ui, args: &CopyArgs) -> anyhow::Result<u8> {
+pub fn handle(settings: &Settings, ui: &Ui, args: &Copy) -> anyhow::Result<u8> {
     let identity = store::resolve(&settings.ssh_dir, &args.identity)?;
     let opts = CopyOptions::from_args(args, settings);
     if opts.alias.is_some() && args.targets.len() != 1 {

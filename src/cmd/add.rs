@@ -2,14 +2,20 @@
 
 use anyhow::bail;
 
-use crate::cli::AddArgs;
 use crate::identity::Identity;
 use crate::identity::store::{self, Entry};
 use crate::settings::Settings;
 use crate::ssh::agent::{self, AgentStatus};
 use crate::ui::Ui;
 
-pub fn run(settings: &Settings, ui: &Ui, args: &AddArgs) -> anyhow::Result<u8> {
+#[derive(clap::Parser, Debug)]
+pub struct Add {
+    /// Identities to load; every identity when none are given
+    #[arg(value_name = "IDENTITY")]
+    pub identities: Vec<String>,
+}
+
+pub fn handle(settings: &Settings, ui: &Ui, args: &Add) -> anyhow::Result<u8> {
     let identities: Vec<Identity> = if args.identities.is_empty() {
         store::scan(&settings.ssh_dir)?
             .into_iter()

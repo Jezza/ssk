@@ -11,6 +11,9 @@ use crate::settings::Settings;
 use crate::state::{Deployment, State};
 use crate::ui::Ui;
 
+#[derive(clap::Parser, Debug)]
+pub struct Hosts {}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HostRow {
     pub host: String,
@@ -117,7 +120,7 @@ pub fn to_json(rows: &[HostRow]) -> Vec<HostJson> {
         .collect()
 }
 
-pub fn run(settings: &Settings, ui: &Ui) -> anyhow::Result<u8> {
+pub fn handle(settings: &Settings, ui: &Ui, _args: &Hosts) -> anyhow::Result<u8> {
     let state = State::load(&settings.ssh_dir)?;
     let rows = collect(&state);
     if settings.json {
