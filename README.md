@@ -74,6 +74,13 @@ Targets are `[user@]host[:port]`, or a `Host` alias from your own ssh config.
 takes `--copy TARGET` (and `-o` for it) too, for the common case of creating
 a key and installing it in one go.
 
+When a host has been reinstalled its key no longer matches `known_hosts`, and
+ssh refuses to connect. If you know why the key changed,
+`ssk copy --replace-host-key` removes the old entry (with `ssh-keygen -R`,
+under the name and in the files `ssh -G` reports for the target) and
+connects again, and ssh shows you the new fingerprint to accept. The old
+entry is only removed when ssh actually reports a changed key.
+
 Then ask what you have.
 
 ```

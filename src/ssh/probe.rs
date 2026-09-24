@@ -19,7 +19,9 @@ pub enum ProbeResult {
     Installed,
     /// The server answered "Permission denied", or let us in on some *other* key.
     NotInstalled,
-    /// Anything else (unreachable, host key changed, DNS...). ssh's stderr, trimmed.
+    /// The host's key no longer matches known_hosts. ssh's "Host key for ... has changed" line.
+    HostKeyChanged(String),
+    /// Anything else (unreachable, unknown host key, DNS...). ssh's stderr, trimmed.
     Error(String),
 }
 
@@ -68,6 +70,8 @@ pub fn classify(out: &SshOutput, key_path: &Path, fingerprint: &str) -> ProbeRes
         }
     } else if out.stderr.contains("Permission denied") {
         ProbeResult::NotInstalled
+    } else if let Some(line) = host_key_changed(&out.stderr) {
+        ProbeResult::HostKeyChanged(line)
     } else {
         ProbeResult::Error(error_message(&out.stderr))
     }
@@ -87,6 +91,20 @@ fn accepted(stderr: &str, key_path: &Path, fingerprint: &str) -> bool {
             (!key.is_empty() && rest.split_whitespace().next() == Some(key.as_str()))
                 || (!fingerprint.is_empty() && rest.contains(fingerprint))
         })
+}
+
+/// ssh's own "Host key for <host> has changed and you have requested strict checking."
+/// line, or the banner's headline if that line is missing. ssh prints the same
+/// "Host key verification failed." for an unknown host under strict checking, so that
+/// line alone is not enough.
+fn host_key_changed(stderr: &str) -> Option<String> {
+    let changed = |l: &&str| l.starts_with("Host key for ") && l.contains(" has changed");
+    let lines = || stderr.lines().map(str::trim);
+    lines().find(changed).map(str::to_string).or_else(|| {
+        lines()
+            .any(|l| l.contains("REMOTE HOST IDENTIFICATION HAS CHANGED"))
+            .then(|| "remote host identification has changed".to_string())
+    })
 }
 
 /// ssh runs at `LogLevel=DEBUG1` so it can name the accepted key (see `accepted` above),
@@ -126,7 +144,7 @@ pub fn probe(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ssh::runner::fake::{FakeSsh, accepts, denied, ok, unreachable};
+    use crate::ssh::runner::fake::{FakeSsh, accepts, denied, host_key_changed, ok, unreachable};
     use std::path::Path;
 
     fn target() -> Target {
@@ -258,6 +276,30 @@ mod tests {
         };
         assert_eq!(
             classify(&odd, k, "SHA256:abc"),
+            ProbeResult::Error("Host key verification failed.".into())
+        );
+    }
+
+    /// "Host key verification failed." alone also covers an unknown host under strict
+    /// checking, so only ssh's changed-key wording counts.
+    #[test]
+    fn a_changed_host_key_is_told_apart_from_other_failures() {
+        let k = Path::new("/k/work");
+        assert_eq!(
+            classify(&host_key_changed(), k, "SHA256:abc"),
+            ProbeResult::HostKeyChanged(
+                "Host key for h has changed and you have requested strict checking.".into()
+            )
+        );
+        let unknown = SshOutput {
+            code: Some(255),
+            stdout: String::new(),
+            stderr: "No ED25519 host key is known for h and you have requested strict checking.\n\
+                     Host key verification failed.\n"
+                .into(),
+        };
+        assert_eq!(
+            classify(&unknown, k, "SHA256:abc"),
             ProbeResult::Error("Host key verification failed.".into())
         );
     }

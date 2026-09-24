@@ -375,6 +375,13 @@ pub fn handle(settings: &Settings, ui: &Ui, args: &Rotate) -> anyhow::Result<u8>
                 blocked = true;
                 ui.error(format!("{at}: could not connect: {m}"));
             }
+            copy::Outcome::HostKeyChanged => {
+                blocked = true;
+                ui.error(format!(
+                    "{at}: the host key no longer matches known_hosts. If the host was reinstalled, `ssk copy --replace-host-key {} {at}` accepts its new key",
+                    old.name
+                ));
+            }
             copy::Outcome::Failed(m) => {
                 blocked = true;
                 ui.error(format!("{at}: install failed: {m}"));

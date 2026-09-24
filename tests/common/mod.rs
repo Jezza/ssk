@@ -9,6 +9,7 @@ pub fn ssk() -> assert_cmd::Command {
         .env_remove("SSK_SSH_DIR")
         .env_remove("SSK_SSH_BIN")
         .env_remove("SSK_SSH_ADD_BIN")
+        .env_remove("SSK_SSH_KEYGEN_BIN")
         .env_remove("SSK_DEFAULT_TYPE")
         .env_remove("SSK_RSA_BITS")
         .env_remove("SSK_COMMENT")
@@ -34,18 +35,34 @@ use std::path::PathBuf;
 /// `Server accepts key:` debug line ssk's probe insists on.
 /// `FAKE_SSH_FAIL_HOST=<host>` refuses every connection to that host;
 /// `FAKE_SSH_FAIL_REVOKE=1` makes the revoke snippet fail with exit 1.
+/// `FAKE_SSH_KNOWN_HOSTS=<file>` is what `ssh -G` reports as the user known_hosts file;
+/// while it holds an entry for the host (`host`, or `[host]:port` off 22) that key is
+/// taken to be stale and every connection fails with ssh's changed-host-key banner.
 pub fn fake_ssh(dir: &Path) -> PathBuf {
     let script = dir.join("fake-ssh");
     fs::write(
         &script,
         r#"#!/bin/sh
 printf '%s\n' "$*" >> "$FAKE_SSH_DIR/args.log"
-host=""; key=""; prev=""; last=""
+host=""; key=""; port=22; prev=""; last=""
 for a in "$@"; do
   if [ "$prev" = "--" ] && [ -z "$host" ]; then host="$a"; fi
   if [ "$prev" = "-i" ]; then key="$a"; fi
+  if [ "$prev" = "-p" ]; then port="$a"; fi
   prev="$a"; last="$a"
 done
+if [ "$1" = "-G" ]; then
+  printf 'hostname %s\nport %s\nuserknownhostsfile %s\n' "$host" "$port" "${FAKE_SSH_KNOWN_HOSTS:-none}"
+  exit 0
+fi
+name="$host"; [ "$port" = 22 ] || name="[$host]:$port"
+if [ -n "$FAKE_SSH_KNOWN_HOSTS" ] && [ -f "$FAKE_SSH_KNOWN_HOSTS" ] \
+   && awk -v n="$name" '$1 == n { f = 1 } END { exit !f }' "$FAKE_SSH_KNOWN_HOSTS"; then
+  echo "@    WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!     @" >&2
+  echo "Host key for $name has changed and you have requested strict checking." >&2
+  echo "Host key verification failed." >&2
+  exit 255
+fi
 if [ -n "$FAKE_SSH_FAIL_HOST" ] && [ "$host" = "$FAKE_SSH_FAIL_HOST" ]; then
   echo "ssh: connect to host $host port 22: Connection refused" >&2
   exit 255

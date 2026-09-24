@@ -9,7 +9,7 @@ use crate::identity::Identity;
 use crate::identity::store;
 use crate::settings::Settings;
 use crate::ssh::runner::{RealSsh, SshRunner};
-use crate::ssh::{agent, config, install, probe};
+use crate::ssh::{agent, config, install, known_hosts, probe};
 use crate::state::{self, Deployment, State};
 use crate::target::{self, Target};
 use crate::ui::{Ui, shell_join};
@@ -50,6 +50,11 @@ pub struct Copy {
     /// Install even if the key already authenticates
     #[arg(short = 'f', long)]
     pub force: bool,
+
+    /// The host was reinstalled: if its key no longer matches known_hosts, forget the old
+    /// one and let ssh ask you to accept the new one
+    #[arg(long)]
+    pub replace_host_key: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -58,6 +63,8 @@ pub struct CopyOptions {
     pub alias: Option<String>,
     pub write_config: bool,
     pub force: bool,
+    /// On a changed host key, drop the old known_hosts entry and probe again.
+    pub replace_host_key: bool,
     /// Extra -i for the install step; rotate passes the current key.
     pub auth_key: Option<PathBuf>,
 }
@@ -69,6 +76,7 @@ impl Default for CopyOptions {
             alias: None,
             write_config: true,
             force: false,
+            replace_host_key: false,
             auth_key: None,
         }
     }
@@ -88,6 +96,7 @@ impl CopyOptions {
                 settings.write_ssh_config
             },
             force: a.force,
+            replace_host_key: a.replace_host_key,
             auth_key: None,
         }
     }
@@ -101,6 +110,8 @@ pub enum Outcome {
     InstalledUnverified,
     /// The probe could not even get a "Permission denied" out of the host.
     Unreachable(String),
+    /// The host's key no longer matches known_hosts; nothing was changed.
+    HostKeyChanged,
     Failed(String),
     DryRun,
 }
@@ -242,16 +253,58 @@ pub fn copy_one(
         "{target}: checking whether '{}' already works",
         identity.name
     ));
-    match probe::probe(
-        runner,
-        &identity.private_path,
-        &identity.fingerprint,
-        target,
-        &opts.ssh_options,
-    )? {
+    let run_probe = || {
+        probe::probe(
+            runner,
+            &identity.private_path,
+            &identity.fingerprint,
+            target,
+            &opts.ssh_options,
+        )
+    };
+    let mut first = run_probe()?;
+    if opts.replace_host_key
+        && let probe::ProbeResult::HostKeyChanged(msg) = &first
+    {
+        let (lookup, changed) = known_hosts::forget(runner, target, &opts.ssh_options)?;
+        if changed.is_empty() {
+            let files: Vec<String> = lookup
+                .files
+                .iter()
+                .map(|f| f.display().to_string())
+                .collect();
+            return Ok(Outcome::Unreachable(format!(
+                "{msg} No entry for {} in {}; the old key may be in the system-wide known hosts file",
+                lookup.name,
+                if files.is_empty() {
+                    "any user known_hosts file".to_string()
+                } else {
+                    files.join(", ")
+                }
+            )));
+        }
+        for file in &changed {
+            ui.info(format!(
+                "{target}: removed the old host key for {} from {} (backup: {}.old)",
+                lookup.name,
+                file.display(),
+                file.display()
+            ));
+        }
+        ui.info(format!(
+            "{target}: checking again; ssh will show the new host key and ask you to accept it"
+        ));
+        first = run_probe()?;
+    }
+    match first {
         probe::ProbeResult::Installed if !opts.force => return Ok(Outcome::AlreadyInstalled),
         probe::ProbeResult::Installed | probe::ProbeResult::NotInstalled => {}
-        probe::ProbeResult::Error(msg) => return Ok(Outcome::Unreachable(msg)),
+        probe::ProbeResult::HostKeyChanged(_) if !opts.replace_host_key => {
+            return Ok(Outcome::HostKeyChanged);
+        }
+        probe::ProbeResult::Error(msg) | probe::ProbeResult::HostKeyChanged(msg) => {
+            return Ok(Outcome::Unreachable(msg));
+        }
     }
 
     ui.info(format!(
@@ -298,7 +351,7 @@ pub fn copy_one(
         )? {
             probe::ProbeResult::Installed => Outcome::Installed,
             probe::ProbeResult::NotInstalled => Outcome::InstalledUnverified,
-            probe::ProbeResult::Error(msg) => {
+            probe::ProbeResult::Error(msg) | probe::ProbeResult::HostKeyChanged(msg) => {
                 Outcome::Failed(format!("verification could not connect: {msg}"))
             }
         },
@@ -333,6 +386,13 @@ fn describe_dry_run(
     );
     ui.info(format!("{target}: would run"));
     ui.info(format!("  ssh {}", shell_join(&probe_inv.args)));
+    if opts.replace_host_key {
+        let g = known_hosts::invocation(target, &opts.ssh_options);
+        ui.info(format!(
+            "  if the host key has changed: ssh {}, ssh-keygen -R <name> -f <file> for each user known_hosts file listed, then the probe again",
+            shell_join(&g.args)
+        ));
+    }
     ui.info(format!(
         "  ssh {}   (public key on stdin)",
         shell_join(&install_inv.args)
@@ -359,6 +419,9 @@ fn report(ui: &Ui, identity: &Identity, target: &Target, outcome: &Outcome) {
             identity.name
         )),
         Outcome::Unreachable(msg) => ui.error(format!("{target}: could not connect: {msg}")),
+        Outcome::HostKeyChanged => ui.error(format!(
+            "{target}: the host key no longer matches known_hosts. If the host was reinstalled, rerun with --replace-host-key to accept its new key"
+        )),
         Outcome::Failed(msg) => ui.error(format!("{target}: install failed: {msg}")),
         Outcome::DryRun => {}
     }
@@ -369,7 +432,7 @@ mod tests {
     use super::*;
     use crate::identity::keygen::{KeySpec, KeyType, generate, write_pair};
     use crate::ssh::runner::SshOutput;
-    use crate::ssh::runner::fake::{FakeSsh, accepts, denied, ok, unreachable};
+    use crate::ssh::runner::fake::{FakeSsh, accepts, denied, host_key_changed, ok, unreachable};
 
     fn fixture() -> (tempfile::TempDir, Identity) {
         let tmp = tempfile::tempdir().unwrap();
@@ -485,6 +548,100 @@ mod tests {
             Outcome::Installed
         );
         assert_eq!(ssh.calls().len(), 3);
+    }
+
+    #[test]
+    fn changed_host_key_without_the_flag_stops_and_leaves_known_hosts_alone() {
+        let (_tmp, id) = fixture();
+        let ssh = FakeSsh::new(vec![host_key_changed()]);
+        let out = copy_one(&ssh, &Ui::silent(), &id, &t(), &CopyOptions::default(), "k").unwrap();
+        assert_eq!(out, Outcome::HostKeyChanged);
+        assert_eq!(ssh.calls().len(), 1, "no ssh -G, no install");
+    }
+
+    fn ssh_g(known_hosts: &Path) -> SshOutput {
+        SshOutput {
+            code: Some(0),
+            stdout: format!(
+                "hostname example.test\nport 2222\nuserknownhostsfile {}\n",
+                known_hosts.display()
+            ),
+            stderr: String::new(),
+        }
+    }
+
+    const HOST_LINE: &str =
+        "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOxSJm+vKgPtjF+3LXECms+G30LapzDZVnEL1zVmOdBP";
+
+    #[test]
+    fn replace_host_key_forgets_the_old_key_then_installs() {
+        if which::which("ssh-keygen").is_err() {
+            return;
+        }
+        let (tmp, id) = fixture();
+        let kh = tmp.path().join("known_hosts");
+        std::fs::write(
+            &kh,
+            format!("[example.test]:2222 {HOST_LINE}\nother {HOST_LINE}\n"),
+        )
+        .unwrap();
+        let ssh = FakeSsh::new(vec![
+            host_key_changed(),
+            ssh_g(&kh),
+            denied(),
+            ok(),
+            accepts(&id.private_path),
+        ]);
+        let opts = CopyOptions {
+            replace_host_key: true,
+            ..Default::default()
+        };
+        let out = copy_one(&ssh, &Ui::silent(), &id, &t(), &opts, "k").unwrap();
+        assert_eq!(out, Outcome::Installed);
+        let calls = ssh.calls();
+        assert_eq!(calls.len(), 5, "probe, -G, probe, install, verify");
+        assert_eq!(calls[1].args[0], "-G");
+        assert_eq!(calls[2].args, calls[0].args, "the same probe, run again");
+        assert_eq!(
+            std::fs::read_to_string(&kh).unwrap(),
+            format!("other {HOST_LINE}\n")
+        );
+    }
+
+    #[test]
+    fn replace_host_key_does_nothing_when_the_host_is_just_down() {
+        let (_tmp, id) = fixture();
+        let ssh = FakeSsh::new(vec![unreachable()]);
+        let opts = CopyOptions {
+            replace_host_key: true,
+            ..Default::default()
+        };
+        let out = copy_one(&ssh, &Ui::silent(), &id, &t(), &opts, "k").unwrap();
+        assert!(matches!(out, Outcome::Unreachable(_)), "{out:?}");
+        assert_eq!(ssh.calls().len(), 1);
+    }
+
+    /// The stale key lives somewhere ssk can't edit (the system-wide file): say so
+    /// instead of probing into the same failure again.
+    #[test]
+    fn replace_host_key_stops_when_no_user_file_has_the_entry() {
+        if which::which("ssh-keygen").is_err() {
+            return;
+        }
+        let (tmp, id) = fixture();
+        let kh = tmp.path().join("known_hosts");
+        std::fs::write(&kh, format!("other {HOST_LINE}\n")).unwrap();
+        let ssh = FakeSsh::new(vec![host_key_changed(), ssh_g(&kh)]);
+        let opts = CopyOptions {
+            replace_host_key: true,
+            ..Default::default()
+        };
+        let out = copy_one(&ssh, &Ui::silent(), &id, &t(), &opts, "k").unwrap();
+        assert!(
+            matches!(out, Outcome::Unreachable(ref m) if m.contains("[example.test]:2222") && m.contains(&kh.display().to_string())),
+            "{out:?}"
+        );
+        assert_eq!(ssh.calls().len(), 2);
     }
 
     #[test]

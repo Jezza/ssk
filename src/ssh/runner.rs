@@ -169,6 +169,24 @@ pub mod fake {
         }
     }
 
+    /// What ssh prints when the host's key no longer matches known_hosts (the host was
+    /// reinstalled, or someone is in the middle).
+    pub fn host_key_changed() -> SshOutput {
+        SshOutput {
+            code: Some(255),
+            stdout: String::new(),
+            stderr: "debug1: Connecting to h [10.0.0.1] port 22.\n\
+                     @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n\
+                     @    WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!     @\n\
+                     @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n\
+                     IT IS POSSIBLE THAT SOMEONE IS DOING SOMETHING NASTY!\n\
+                     Offending ED25519 key in /home/u/.ssh/known_hosts:3\n\
+                     Host key for h has changed and you have requested strict checking.\n\
+                     Host key verification failed.\n"
+                .to_string(),
+        }
+    }
+
     pub fn unreachable() -> SshOutput {
         SshOutput {
             code: Some(255),

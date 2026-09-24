@@ -253,8 +253,10 @@ pub fn revoke_one(
             ProbeResult::NotInstalled if removed => Outcome::Revoked,
             ProbeResult::NotInstalled => Outcome::NotPresent,
             ProbeResult::Installed => Outcome::StillAccepted,
-            ProbeResult::Error(msg) if removed => Outcome::RevokedUnverified(msg),
-            ProbeResult::Error(_) => Outcome::NotPresent,
+            ProbeResult::Error(msg) | ProbeResult::HostKeyChanged(msg) if removed => {
+                Outcome::RevokedUnverified(msg)
+            }
+            ProbeResult::Error(_) | ProbeResult::HostKeyChanged(_) => Outcome::NotPresent,
         },
     )
 }

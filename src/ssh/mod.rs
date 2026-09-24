@@ -3,6 +3,7 @@
 pub mod agent;
 pub mod config;
 pub mod install;
+pub mod known_hosts;
 pub mod probe;
 pub mod revoke;
 pub mod runner;

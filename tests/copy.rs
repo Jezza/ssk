@@ -134,6 +134,79 @@ fn copy_unreachable_host_exits_one_and_records_nothing() {
     );
 }
 
+const HOST_KEY: &str =
+    "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOxSJm+vKgPtjF+3LXECms+G30LapzDZVnEL1zVmOdBP";
+
+#[test]
+fn copy_to_a_reinstalled_host_points_at_replace_host_key() {
+    let w = world();
+    let fake = fake_ssh(&w.root);
+    let kh = w.root.join("known_hosts");
+    let before = format!("[example.test]:2222 {HOST_KEY}\n");
+    fs::write(&kh, &before).unwrap();
+    copy_cmd(&w, &fake, &w.root)
+        .env("FAKE_SSH_KNOWN_HOSTS", &kh)
+        .args(["copy", "work", "deploy@example.test:2222"])
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains("no longer matches known_hosts"))
+        .stderr(predicate::str::contains("--replace-host-key"));
+    assert_eq!(fs::read_to_string(&kh).unwrap(), before);
+}
+
+#[test]
+fn copy_replace_host_key_forgets_the_old_key_and_installs() {
+    if which::which("ssh-keygen").is_err() {
+        return;
+    }
+    let w = world();
+    let fake = fake_ssh(&w.root);
+    let kh = w.root.join("known_hosts");
+    fs::write(
+        &kh,
+        format!("[example.test]:2222 {HOST_KEY}\nother.test {HOST_KEY}\n"),
+    )
+    .unwrap();
+    copy_cmd(&w, &fake, &w.root)
+        .env("FAKE_SSH_KNOWN_HOSTS", &kh)
+        .args([
+            "copy",
+            "work",
+            "deploy@example.test:2222",
+            "--replace-host-key",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "removed the old host key for [example.test]:2222",
+        ))
+        .stdout(predicate::str::contains("installed and verified"));
+    assert_eq!(
+        fs::read_to_string(&kh).unwrap(),
+        format!("other.test {HOST_KEY}\n")
+    );
+    assert!(w.root.join("known_hosts.old").exists());
+}
+
+#[test]
+fn copy_replace_host_key_dry_run_mentions_the_step() {
+    let w = world();
+    let fake = fake_ssh(&w.root);
+    copy_cmd(&w, &fake, &w.root)
+        .args([
+            "--dry-run",
+            "copy",
+            "work",
+            "example.test",
+            "--replace-host-key",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("if the host key has changed"))
+        .stdout(predicate::str::contains("ssh-keygen -R"));
+    assert!(!w.root.join("args.log").exists());
+}
+
 #[test]
 fn copy_alias_needs_exactly_one_target() {
     let w = world();
