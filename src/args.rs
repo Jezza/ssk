@@ -80,6 +80,8 @@ pub enum Command {
     Delete(delete::Delete),
     /// Rename an identity; state and generated ssh config follow
     Rename(rename::Rename),
+    /// Change the ssh config Host alias of a recorded deployment, without contacting it
+    Alias(alias::Alias),
     /// Remove an identity's public key from hosts
     Revoke(revoke::Revoke),
     /// Read or write ~/.config/ssk/config.toml
@@ -103,6 +105,7 @@ impl Command {
             Command::Add(_) => "add",
             Command::Delete(_) => "delete",
             Command::Rename(_) => "rename",
+            Command::Alias(_) => "alias",
             Command::Revoke(_) => "revoke",
             Command::Config(_) => "config",
             Command::Rotate(_) => "rotate",

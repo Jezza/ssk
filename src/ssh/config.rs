@@ -92,6 +92,21 @@ pub fn render_conf_with(dir_display: &str, identity: &str, deployments: &[Deploy
     s
 }
 
+/// One word ssh reads as a literal Host name: no whitespace, no pattern characters,
+/// nothing that would start a comment or a quoted string.
+pub fn validate_alias(alias: &str) -> anyhow::Result<()> {
+    if alias.is_empty()
+        || alias
+            .chars()
+            .any(|c| c.is_whitespace() || c.is_control() || "*?!,#\"".contains(c))
+    {
+        anyhow::bail!(
+            "'{alias}' is not a usable Host alias: it must be one word without whitespace or any of * ? ! , # \""
+        );
+    }
+    Ok(())
+}
+
 pub fn conf_path(ssh_dir: &Path, identity: &str) -> PathBuf {
     ssh_dir.join("ssk.d").join(format!("{identity}.conf"))
 }
@@ -310,5 +325,13 @@ mod tests {
         let got = user_config_mentions(d, "work").unwrap();
         let lines: Vec<usize> = got.iter().map(|(n, _)| *n).collect();
         assert_eq!(lines, vec![2, 7, 8], "{got:?}");
+    }
+
+    #[test]
+    fn validate_rejects_patterns_and_spaces() {
+        assert!(validate_alias("prod-1.box").is_ok());
+        for bad in ["", "a b", "a*", "a?", "!a", "a,b", "#a", "a\"", "a\tb"] {
+            assert!(validate_alias(bad).is_err(), "{bad:?}");
+        }
     }
 }

@@ -155,6 +155,9 @@ pub fn runner_for(settings: &Settings) -> anyhow::Result<Option<Box<dyn SshRunne
 pub fn handle(settings: &Settings, ui: &Ui, args: &Copy) -> anyhow::Result<u8> {
     let identity = store::resolve(&settings.ssh_dir, &args.identity)?;
     let opts = CopyOptions::from_args(args, settings);
+    if let Some(alias) = &opts.alias {
+        config::validate_alias(alias)?;
+    }
     if opts.alias.is_some() && args.targets.len() != 1 {
         bail!(
             "--alias applies to exactly one target; got {}",

@@ -130,7 +130,7 @@ just have no creation time until ssk records something about them.
 - `~/.ssh/ssk.d/<name>.conf`, one per identity with deployments: a generated
   `Host` block per deployment with `IdentityFile` and `IdentitiesOnly yes`, so
   `ssh dev` picks the right key without you editing anything. These files are
-  rewritten on every `copy`, `revoke` and `rename`; do not edit them.
+  rewritten on every `copy`, `revoke`, `rename` and `alias`; do not edit them.
 - A single line, `Include ~/.ssh/ssk.d/*.conf`, at the top of `~/.ssh/config`.
   That is the only change ssk ever makes to your own config. Everything below
   it is preserved byte for byte, and if `config` is a symlink into a dotfiles
@@ -153,6 +153,13 @@ the identity is still recorded on any, ssk says so and points at `revoke`.
 `ssk rename OLD NEW` moves the key pair and everything ssk keeps about it.
 Your own `~/.ssh/config` is never edited, but any line in it that names the
 old path is reported so you can fix it.
+
+`ssk alias NEW TARGET` renames the `Host` block of a deployment without
+contacting the host. `TARGET` is its current alias, its host, or
+`user@host:port`; when that names more than one deployment ssk lists them,
+and `-i IDENTITY` or the full `user@host:port` narrows it down. An alias
+already used by another deployment is refused, since ssh would only ever
+read the first block. `ssk alias --reset TARGET` goes back to the plain host.
 
 `ssk revoke NAME TARGET...` removes the public key from each host's
 `authorized_keys`, matching on the key blob so that a line installed by hand

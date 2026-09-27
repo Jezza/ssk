@@ -124,6 +124,17 @@ impl State {
         entry.deployments.push(dep);
     }
 
+    /// Change the alias of `name`'s deployment at `idx`, as returned by `deployments`.
+    pub fn set_alias(&mut self, name: &str, idx: usize, alias: String) {
+        if let Some(d) = self
+            .identity
+            .get_mut(name)
+            .and_then(|s| s.deployments.get_mut(idx))
+        {
+            d.alias = alias;
+        }
+    }
+
     pub fn deployments(&self, name: &str) -> &[Deployment] {
         self.identity
             .get(name)

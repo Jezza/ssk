@@ -46,6 +46,7 @@ fn main() -> ExitCode {
         Command::Add(args) => cmd::add::handle(&settings, &ui, args),
         Command::Delete(args) => cmd::delete::handle(&settings, &ui, args),
         Command::Rename(args) => cmd::rename::handle(&settings, &ui, args),
+        Command::Alias(args) => cmd::alias::handle(&settings, &ui, args),
         Command::Revoke(args) => cmd::revoke::handle(&settings, &ui, args),
         Command::Config(args) => cmd::config::handle(&settings, &ui, args),
         Command::Rotate(args) => cmd::rotate::handle(&settings, &ui, args),

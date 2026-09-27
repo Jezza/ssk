@@ -16,6 +16,7 @@ pub mod ui;
 
 pub mod cmd {
     pub mod add;
+    pub mod alias;
     pub mod completions;
     pub mod config;
     pub mod copy;

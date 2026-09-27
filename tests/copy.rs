@@ -219,6 +219,18 @@ fn copy_alias_needs_exactly_one_target() {
 }
 
 #[test]
+fn copy_rejects_an_unusable_alias_before_any_ssh() {
+    let w = world();
+    let fake = fake_ssh(&w.root);
+    copy_cmd(&w, &fake, &w.root)
+        .args(["copy", "work", "a.test", "--alias", "bad name"])
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains("not a usable Host alias"));
+    assert!(!w.root.join("args.log").exists());
+}
+
+#[test]
 fn copy_unknown_identity_fails_before_any_ssh() {
     let w = world();
     let fake = fake_ssh(&w.root);

@@ -51,6 +51,7 @@ fn help_lists_every_subcommand() {
         "add",
         "rm",
         "rename",
+        "alias",
         "revoke",
         "config",
         "rotate",
