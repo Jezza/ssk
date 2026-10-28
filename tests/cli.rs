@@ -48,7 +48,7 @@ fn help_lists_every_subcommand() {
         "show",
         "doctor",
         "completions",
-        "add",
+        "agent",
         "rm",
         "rename",
         "alias",
@@ -96,14 +96,14 @@ fn new_and_copy_have_the_override_flags() {
         .args(["new", "--help"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("--no-add"));
+        .stdout(predicate::str::contains("--no-load"));
     ssk()
         .args(["copy", "--help"])
         .assert()
         .success()
         .stdout(predicate::str::contains("--write-config"));
     ssk()
-        .args(["new", "x", "--add", "--no-add"])
+        .args(["new", "x", "--load", "--no-load"])
         .assert()
         .code(2);
     ssk()
@@ -118,9 +118,9 @@ fn rotate_has_the_agent_override_flags() {
         .args(["rotate", "--help"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("--no-add"));
+        .stdout(predicate::str::contains("--no-load"));
     ssk()
-        .args(["rotate", "x", "--add", "--no-add"])
+        .args(["rotate", "x", "--load", "--no-load"])
         .assert()
         .code(2);
 }

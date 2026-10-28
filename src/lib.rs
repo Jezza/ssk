@@ -15,7 +15,7 @@ pub mod target;
 pub mod ui;
 
 pub mod cmd {
-    pub mod add;
+    pub mod agent;
     pub mod alias;
     pub mod completions;
     pub mod config;
@@ -23,6 +23,7 @@ pub mod cmd {
     pub mod delete;
     pub mod doctor;
     pub mod hosts;
+    pub mod import;
     pub mod list;
     pub mod new;
     pub mod rename;

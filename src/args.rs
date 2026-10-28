@@ -63,6 +63,8 @@ pub enum ColorChoice {
 pub enum Command {
     /// Generate a new key pair
     New(new::New),
+    /// Adopt a key pair made elsewhere: move it into the ssh directory (or copy, with --keep)
+    Import(import::Import),
     /// Install an identity's public key on one or more hosts
     Copy(copy::Copy),
     /// Show all identities
@@ -73,8 +75,8 @@ pub enum Command {
     /// Find (and fix) hygiene problems in the ssh directory
     #[command(alias = "doc")]
     Doctor(doctor::Doctor),
-    /// Load identities into ssh-agent
-    Add(add::Add),
+    /// Load identities into ssh-agent, unload them, or see what it holds
+    Agent(agent::Agent),
     /// Delete an identity from this machine
     #[command(alias = "rm", alias = "remove")]
     Delete(delete::Delete),
@@ -98,11 +100,12 @@ impl Command {
     pub fn name(&self) -> &'static str {
         match self {
             Command::New(_) => "new",
+            Command::Import(_) => "import",
             Command::Copy(_) => "copy",
             Command::List(_) => "list",
             Command::Show(_) => "show",
             Command::Doctor(_) => "doctor",
-            Command::Add(_) => "add",
+            Command::Agent(_) => "agent",
             Command::Delete(_) => "delete",
             Command::Rename(_) => "rename",
             Command::Alias(_) => "alias",

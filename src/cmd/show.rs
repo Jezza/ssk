@@ -97,15 +97,17 @@ pub fn render(
         )?,
         None => writeln!(s, "  public       (missing; run `ssk doctor --fix`)")?,
     }
-    let created = state
-        .identity
-        .get(&id.name)
-        .and_then(|x| x.created.as_deref());
+    let entry = state.identity.get(&id.name);
     writeln!(
         s,
         "  created      {}",
-        created.unwrap_or("unknown (not created by ssk)")
+        entry
+            .and_then(|x| x.created.as_deref())
+            .unwrap_or("unknown (not created by ssk)")
     )?;
+    if let Some(imported) = entry.and_then(|x| x.imported.as_deref()) {
+        writeln!(s, "  imported     {imported}")?;
+    }
     let deployments = state.deployments(&id.name);
     if deployments.is_empty() {
         writeln!(s, "  hosts        none recorded")?;
@@ -150,6 +152,10 @@ pub fn render_json(
             .transpose()?
             .map(|m| format!("{m:04o}")),
         created: state.identity.get(&id.name).and_then(|x| x.created.clone()),
+        imported: state
+            .identity
+            .get(&id.name)
+            .and_then(|x| x.imported.clone()),
         deployments: state
             .deployments(&id.name)
             .iter()

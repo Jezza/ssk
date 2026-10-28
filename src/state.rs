@@ -22,6 +22,9 @@ pub struct State {
 pub struct IdentityState {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub created: Option<String>,
+    /// When `ssk import` adopted a key made elsewhere.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub imported: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub deployments: Vec<Deployment>,
 }
@@ -115,6 +118,10 @@ impl State {
 
     pub fn record_created(&mut self, name: &str, when: String) {
         self.identity.entry(name.to_string()).or_default().created = Some(when);
+    }
+
+    pub fn record_imported(&mut self, name: &str, when: String) {
+        self.identity.entry(name.to_string()).or_default().imported = Some(when);
     }
 
     /// Add a deployment, replacing any earlier record for the same host/user/port.

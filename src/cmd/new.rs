@@ -49,13 +49,13 @@ pub struct New {
     #[arg(long)]
     pub passphrase_stdin: bool,
 
-    /// Add the new key to ssh-agent
-    #[arg(short = 'a', long)]
-    pub add: bool,
+    /// Load the new key into ssh-agent
+    #[arg(short = 'l', long)]
+    pub load: bool,
 
-    /// Don't add the key to ssh-agent, even if add_to_agent is set in the config file
-    #[arg(long, conflicts_with = "add")]
-    pub no_add: bool,
+    /// Don't load the key into ssh-agent, even if add_to_agent is set in the config file
+    #[arg(long, conflicts_with = "load")]
+    pub no_load: bool,
 
     /// Overwrite an existing identity of the same name
     #[arg(short = 'f', long)]
@@ -136,7 +136,7 @@ pub fn handle(settings: &Settings, ui: &Ui, args: &New) -> anyhow::Result<u8> {
     st.record_created(&args.identity, state::now());
     st.save(&settings.ssh_dir)?;
 
-    let add_to_agent = !args.no_add && (args.add || settings.add_to_agent);
+    let add_to_agent = !args.no_load && (args.load || settings.add_to_agent);
     if add_to_agent {
         agent::add(&written.private_path, ui)
             .context("the key was created, but adding it to ssh-agent failed")?;
@@ -144,7 +144,7 @@ pub fn handle(settings: &Settings, ui: &Ui, args: &New) -> anyhow::Result<u8> {
 
     let identity = Identity::load(&settings.ssh_dir, &args.identity)?;
     let public_line = identity.public_key_line()?;
-    print_summary(ui, &identity, &public_line);
+    print_summary(ui, "created", &identity, &public_line);
 
     if !args.copy.is_empty() {
         ui.info("");
@@ -202,8 +202,9 @@ fn non_empty(p: &str) -> Option<Zeroizing<String>> {
     (!p.is_empty()).then(|| Zeroizing::new(p.to_string()))
 }
 
-fn print_summary(ui: &Ui, identity: &Identity, public_line: &str) {
-    ui.success(format!("created identity {}", identity.name));
+/// `verb` is what happened: `created identity work`, `imported identity work`.
+pub fn print_summary(ui: &Ui, verb: &str, identity: &Identity, public_line: &str) {
+    ui.success(format!("{verb} identity {}", identity.name));
     ui.info(format!("  type         {}", identity.type_label()));
     ui.info(format!("  fingerprint  {}", identity.fingerprint));
     ui.info(format!(

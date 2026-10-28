@@ -16,13 +16,40 @@ pub enum AgentStatus {
     Loaded(Vec<String>),
 }
 
+/// One key the agent holds, from an `ssh-add -l` line.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Listed {
+    pub fingerprint: String,
+    /// The key's comment, or the file it was loaded from when it has none.
+    pub comment: String,
+}
+
 /// Parse `ssh-add -l` lines like `256 SHA256:... comment (ED25519)`.
-pub fn parse_list(stdout: &str) -> Vec<String> {
+pub fn parse_listing(stdout: &str) -> Vec<Listed> {
     stdout
         .lines()
-        .filter_map(|line| line.split_whitespace().nth(1))
-        .filter(|f| f.starts_with("SHA256:"))
-        .map(String::from)
+        .filter_map(|line| {
+            let mut words = line.split_whitespace().skip(1);
+            let fingerprint = words.next().filter(|f| f.starts_with("SHA256:"))?;
+            let mut rest: Vec<&str> = words.collect();
+            if rest
+                .last()
+                .is_some_and(|w| w.starts_with('(') && w.ends_with(')'))
+            {
+                rest.pop();
+            }
+            Some(Listed {
+                fingerprint: fingerprint.to_string(),
+                comment: rest.join(" "),
+            })
+        })
+        .collect()
+}
+
+pub fn parse_list(stdout: &str) -> Vec<String> {
+    parse_listing(stdout)
+        .into_iter()
+        .map(|l| l.fingerprint)
         .collect()
 }
 
@@ -39,16 +66,27 @@ pub fn status() -> AgentStatus {
 }
 
 pub fn status_with(auth_sock: Option<&OsStr>) -> AgentStatus {
+    match list_output(auth_sock) {
+        Some(stdout) => AgentStatus::Loaded(parse_list(&stdout)),
+        None => AgentStatus::Unavailable,
+    }
+}
+
+/// Every key the agent holds, comments included; `None` when there is no agent.
+pub fn listing() -> Option<Vec<Listed>> {
+    list_output(std::env::var_os("SSH_AUTH_SOCK").as_deref()).map(|s| parse_listing(&s))
+}
+
+/// `ssh-add -l` stdout, empty for an agent with no keys; `None` when there is no agent.
+fn list_output(auth_sock: Option<&OsStr>) -> Option<String> {
     if auth_sock.is_none_or(|s| s.is_empty()) {
-        return AgentStatus::Unavailable;
+        return None;
     }
     match Command::new(program()).arg("-l").output() {
-        Ok(out) if out.status.success() => {
-            AgentStatus::Loaded(parse_list(&String::from_utf8_lossy(&out.stdout)))
-        }
+        Ok(out) if out.status.success() => Some(String::from_utf8_lossy(&out.stdout).into_owned()),
         // Exit 1 with "The agent has no identities." is a live, empty agent.
-        Ok(out) if out.status.code() == Some(1) => AgentStatus::Loaded(Vec::new()),
-        _ => AgentStatus::Unavailable,
+        Ok(out) if out.status.code() == Some(1) => Some(String::new()),
+        _ => None,
     }
 }
 
@@ -109,6 +147,25 @@ mod tests {
         assert_eq!(parse_list(out), vec!["SHA256:abc/def+ghi=", "SHA256:zzz"]);
         assert!(parse_list("The agent has no identities.\n").is_empty());
         assert!(parse_list("").is_empty());
+    }
+
+    #[test]
+    fn parse_listing_keeps_comments_and_drops_the_type() {
+        let out =
+            "256 SHA256:abc ops team key (ED25519)\n3072 SHA256:zzz /home/j/.ssh/bare (RSA)\n";
+        assert_eq!(
+            parse_listing(out),
+            vec![
+                Listed {
+                    fingerprint: "SHA256:abc".into(),
+                    comment: "ops team key".into()
+                },
+                Listed {
+                    fingerprint: "SHA256:zzz".into(),
+                    comment: "/home/j/.ssh/bare".into()
+                },
+            ]
+        );
     }
 
     #[test]

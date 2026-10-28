@@ -151,7 +151,7 @@ pub fn run_targets(
         && agent::contains(&agent::status(), &identity.fingerprint) != Some(true)
     {
         ui.warn(format!(
-            "'{}' is passphrase-protected and not in ssh-agent; ssh will ask for its passphrase to verify each host. `ssk add {}` avoids that.",
+            "'{}' is passphrase-protected and not in ssh-agent; ssh will ask for its passphrase to verify each host. `ssk agent load {}` avoids that.",
             identity.name, identity.name
         ));
     }

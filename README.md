@@ -55,7 +55,7 @@ next: ssk copy work user@host   (or paste the public key above into GitHub, GitL
 
 ed25519 is the default. `-t rsa -b 4096` and `-t ecdsa -b 384` work as you
 would expect. `--no-passphrase`, `-N <text>` and `--passphrase-stdin` are
-there for scripts, and `--add` loads the new key into the agent straight away.
+there for scripts, and `--load` loads the new key into the agent straight away.
 
 Install it. Each target is checked first, so re-running is harmless; the key
 is only appended when the host does not accept it yet, and a second probe
@@ -125,8 +125,8 @@ just have no creation time until ssk records something about them.
   `.`, `_` and `-`, not starting with a dot, not ending in `.pub`, and not one
   of the names ssh already uses (`config`, `known_hosts`, `authorized_keys`
   and so on).
-- `~/.ssh/ssk.toml`, mode 0600: for each identity, when it was created and a
-  list of deployments (`host`, `user`, `port`, `alias`, `installed`).
+- `~/.ssh/ssk.toml`, mode 0600: for each identity, when it was created (or
+  imported) and a list of deployments (`host`, `user`, `port`, `alias`, `installed`).
 - `~/.ssh/ssk.d/<name>.conf`, one per identity with deployments: a generated
   `Host` block per deployment with `IdentityFile` and `IdentitiesOnly yes`, so
   `ssh dev` picks the right key without you editing anything. These files are
@@ -143,8 +143,20 @@ A different directory can be managed with `--ssh-dir` or `SSK_SSH_DIR`.
 
 ## Lifecycle
 
-`ssk add [NAME...]` loads identities into ssh-agent through `ssh-add`, all of
-them when no names are given.
+`ssk agent load [NAME...]` loads identities into ssh-agent through `ssh-add`,
+all of them when no names are given, skipping any already loaded. `ssk agent
+unload [NAME...]` takes them out again; with no names it removes every ssk
+identity the agent holds and leaves other keys alone. `ssk agent list` shows
+what the agent holds, in the order ssh offers the keys, with the identity
+name for each one ssk manages and `-` for the rest.
+
+`ssk import PATH [NAME]` adopts a key someone else made. The private key at
+`PATH`, and `PATH.pub` if it is there, are moved to `~/.ssh/NAME` and
+`NAME.pub` at modes 0600 and 0644; `NAME` defaults to the file name, and
+`--keep` copies instead of moving. A missing `.pub` is derived from the
+private key, and a `.pub` that belongs to a different key is refused. The
+identity is recorded in `ssk.toml` with the time it was imported. Legacy
+PEM keys have to be converted with `ssh-keygen -p` first.
 
 `ssk rm NAME` deletes the key pair, its `ssk.d` file and its `ssk.toml` entry,
 and drops it from the agent if it was loaded. Remote hosts are not touched; if

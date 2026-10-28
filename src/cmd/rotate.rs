@@ -56,12 +56,12 @@ pub struct Rotate {
     pub passphrase_stdin: bool,
 
     /// Load the new key into ssh-agent as soon as it exists
-    #[arg(short = 'a', long)]
-    pub add: bool,
+    #[arg(short = 'l', long)]
+    pub load: bool,
 
     /// Don't load the new key into ssh-agent, even if add_to_agent is set
-    #[arg(long, conflicts_with = "add")]
-    pub no_add: bool,
+    #[arg(long, conflicts_with = "load")]
+    pub no_load: bool,
 
     /// Extra ssh option for every ssh call, passed through as -o (repeatable)
     #[arg(short = 'o', long = "ssh-option", value_name = "K=V", action = clap::ArgAction::Append)]
@@ -170,9 +170,11 @@ pub fn swap(ssh_dir: &Path, name: &str, lingering: &[Deployment], now: &str) -> 
 
     st.identity.remove(&new_n);
     let previous_created = st.identity.get(name).and_then(|e| e.created.clone());
+    let previous_imported = st.identity.get(name).and_then(|e| e.imported.clone());
     {
         let entry = st.identity.entry(name.to_string()).or_default();
         entry.created = Some(now.to_string());
+        entry.imported = None;
         for d in &mut entry.deployments {
             d.installed = now.to_string();
         }
@@ -190,6 +192,7 @@ pub fn swap(ssh_dir: &Path, name: &str, lingering: &[Deployment], now: &str) -> 
     } else {
         let entry = st.identity.entry(old_n).or_default();
         entry.created = previous_created;
+        entry.imported = previous_imported;
         entry.deployments = lingering.to_vec();
     }
     st.save(ssh_dir)?;
@@ -261,7 +264,7 @@ pub fn handle(settings: &Settings, ui: &Ui, args: &Rotate) -> anyhow::Result<u8>
             old.comment.clone()
         }
     });
-    let add = !args.no_add && (args.add || settings.add_to_agent);
+    let load = !args.no_load && (args.load || settings.add_to_agent);
     let type_label = match bits {
         Some(b) => format!("{} {b}", key_type.as_str()),
         None => key_type.as_str().to_string(),
@@ -330,20 +333,20 @@ pub fn handle(settings: &Settings, ui: &Ui, args: &Rotate) -> anyhow::Result<u8>
     ui.success(format!("{new_n}: {} {}", new.type_label(), new.fingerprint));
     let agent_status = agent::status();
     let in_agent = |id: &Identity| agent::contains(&agent_status, &id.fingerprint) == Some(true);
-    if add {
+    if load {
         if agent_status == agent::AgentStatus::Unavailable {
-            ui.warn("no ssh-agent is available; --add ignored");
+            ui.warn("no ssh-agent is available; --load ignored");
         } else if !in_agent(&new) {
             agent::add(&new.private_path, ui).context("adding the new key to ssh-agent")?;
         }
     } else if new.encrypted && !in_agent(&new) && !deployments.is_empty() {
         ui.warn(format!(
-            "{new_n} is passphrase-protected and not in ssh-agent; ssh will ask for its passphrase for each host. --add loads it once."
+            "{new_n} is passphrase-protected and not in ssh-agent; ssh will ask for its passphrase for each host. --load loads it once."
         ));
     }
     if old.encrypted && !in_agent(&old) && !deployments.is_empty() {
         ui.warn(format!(
-            "'{name}' is passphrase-protected and not in ssh-agent; ssh will ask for its passphrase for each host. `ssk add {name}` first avoids that."
+            "'{name}' is passphrase-protected and not in ssh-agent; ssh will ask for its passphrase for each host. `ssk agent load {name}` first avoids that."
         ));
     }
 

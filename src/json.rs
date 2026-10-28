@@ -103,6 +103,7 @@ pub struct ShowJson {
     pub private_mode: String,
     pub public_mode: Option<String>,
     pub created: Option<String>,
+    pub imported: Option<String>,
     pub deployments: Vec<DeploymentJson>,
     pub ssh_config: Option<PathBuf>,
     pub public_key: Option<String>,

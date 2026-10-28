@@ -39,11 +39,12 @@ fn main() -> ExitCode {
     }
     let result = match &command {
         Command::New(args) => cmd::new::handle(&settings, &ui, args),
+        Command::Import(args) => cmd::import::handle(&settings, &ui, args),
         Command::Copy(args) => cmd::copy::handle(&settings, &ui, args),
         Command::List(args) => cmd::list::handle(&settings, &ui, args),
         Command::Show(args) => cmd::show::handle(&settings, &ui, args),
         Command::Doctor(args) => cmd::doctor::handle(&settings, &ui, args),
-        Command::Add(args) => cmd::add::handle(&settings, &ui, args),
+        Command::Agent(args) => cmd::agent::handle(&settings, &ui, args),
         Command::Delete(args) => cmd::delete::handle(&settings, &ui, args),
         Command::Rename(args) => cmd::rename::handle(&settings, &ui, args),
         Command::Alias(args) => cmd::alias::handle(&settings, &ui, args),
