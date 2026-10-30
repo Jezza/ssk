@@ -184,6 +184,148 @@ fn mentions(line: &str, needle: &str) -> bool {
     })
 }
 
+/// One `Host` line of the user's own ssh config: its patterns, and the file it is in.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HostLine {
+    pub file: PathBuf,
+    pub patterns: Vec<String>,
+}
+
+impl HostLine {
+    /// ssh's rule: some pattern matches `name` and no `!pattern` does.
+    pub fn applies_to(&self, name: &str) -> bool {
+        let mut hit = false;
+        for p in &self.patterns {
+            match p.strip_prefix('!') {
+                Some(negated) => {
+                    if glob_match(negated, name) {
+                        return false;
+                    }
+                }
+                None => hit |= glob_match(p, name),
+            }
+        }
+        hit
+    }
+}
+
+/// The `Host` lines of the user's own `config` and of the files it `Include`s (one level
+/// down, ssk's own `ssk.d` left out), in order. `Match` blocks are not read.
+pub fn user_host_lines(ssh_dir: &Path) -> io::Result<Vec<HostLine>> {
+    let main = ssh_dir.join("config");
+    let text = match fs::read_to_string(&main) {
+        Ok(t) => t,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(e),
+    };
+    let mut lines = host_lines_in(&main, &text);
+    let sskd = ssh_dir.join("ssk.d");
+    for (key, args) in directives(&text) {
+        if !key.eq_ignore_ascii_case("include") {
+            continue;
+        }
+        for file in args.iter().flat_map(|pat| include_files(ssh_dir, pat)) {
+            if file.starts_with(&sskd) {
+                continue;
+            }
+            if let Ok(t) = fs::read_to_string(&file) {
+                lines.extend(host_lines_in(&file, &t));
+            }
+        }
+    }
+    Ok(lines)
+}
+
+fn host_lines_in(file: &Path, text: &str) -> Vec<HostLine> {
+    directives(text)
+        .into_iter()
+        .filter(|(key, _)| key.eq_ignore_ascii_case("host"))
+        .map(|(_, patterns)| HostLine {
+            file: file.to_path_buf(),
+            patterns,
+        })
+        .collect()
+}
+
+/// `(keyword, arguments)` of every non-comment line; `Key=value` reads like `Key value`.
+fn directives(text: &str) -> Vec<(String, Vec<String>)> {
+    text.lines()
+        .filter_map(|line| {
+            let l = line.trim();
+            if l.is_empty() || l.starts_with('#') {
+                return None;
+            }
+            let mut words = l
+                .split(|c: char| c.is_whitespace() || c == '=')
+                .filter(|w| !w.is_empty());
+            let key = words.next()?.to_string();
+            Some((key, words.map(String::from).collect()))
+        })
+        .collect()
+}
+
+/// The files one `Include` argument names: `~/` and relative paths resolve as ssh
+/// resolves them, and a glob in the file name is expanded in sorted order.
+fn include_files(ssh_dir: &Path, pat: &str) -> Vec<PathBuf> {
+    let path = match pat.strip_prefix("~/") {
+        Some(rest) => match settings::home_dir() {
+            Some(home) => home.join(rest),
+            None => return Vec::new(),
+        },
+        None => ssh_dir.join(pat),
+    };
+    let name = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or_default()
+        .to_string();
+    if !name.contains(['*', '?']) {
+        return vec![path];
+    }
+    let Some(parent) = path.parent() else {
+        return Vec::new();
+    };
+    let mut found: Vec<PathBuf> = fs::read_dir(parent)
+        .map(|entries| {
+            entries
+                .flatten()
+                .map(|e| e.path())
+                .filter(|p| {
+                    p.file_name()
+                        .and_then(|n| n.to_str())
+                        .is_some_and(|n| glob_match(&name, n))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    found.sort();
+    found
+}
+
+/// ssh's pattern match: `*` any run of characters, `?` exactly one, case-insensitive.
+pub fn glob_match(pattern: &str, text: &str) -> bool {
+    let p: Vec<char> = pattern.to_lowercase().chars().collect();
+    let t: Vec<char> = text.to_lowercase().chars().collect();
+    let (mut pi, mut ti) = (0, 0);
+    let mut star: Option<(usize, usize)> = None;
+    while ti < t.len() {
+        if pi < p.len() && (p[pi] == '?' || p[pi] == t[ti]) {
+            pi += 1;
+            ti += 1;
+        } else if pi < p.len() && p[pi] == '*' {
+            star = Some((pi, ti));
+            pi += 1;
+        } else if let Some((sp, st)) = star {
+            pi = sp + 1;
+            ti = st + 1;
+            star = Some((sp, st + 1));
+        } else {
+            return false;
+        }
+    }
+    p[pi..].iter().all(|c| *c == '*')
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -333,5 +475,69 @@ mod tests {
         for bad in ["", "a b", "a*", "a?", "!a", "a,b", "#a", "a\"", "a\tb"] {
             assert!(validate_alias(bad).is_err(), "{bad:?}");
         }
+    }
+
+    #[test]
+    fn glob_matches_like_ssh() {
+        assert!(glob_match("*", "anything"));
+        assert!(glob_match("*", ""));
+        assert!(glob_match("*.example.test", "box.example.test"));
+        assert!(!glob_match("*.example.test", "example.test"));
+        assert!(glob_match("rack-node-?", "rack-node-7"));
+        assert!(!glob_match("rack-node-?", "rack-node-10"));
+        assert!(glob_match("MyBox", "mybox"));
+        assert!(glob_match("a*b*c", "axxbyyc"));
+        assert!(!glob_match("a*b*c", "axxbyy"));
+        assert!(glob_match("", ""));
+        assert!(!glob_match("", "a"));
+        assert!(!glob_match("abc", "ab"));
+    }
+
+    #[test]
+    fn host_line_applies_unless_negated() {
+        let line = |pats: &[&str]| HostLine {
+            file: PathBuf::from("config"),
+            patterns: pats.iter().map(|s| s.to_string()).collect(),
+        };
+        assert!(line(&["mybox"]).applies_to("mybox"));
+        assert!(!line(&["mybox"]).applies_to("gem"));
+        assert!(line(&["a", "b"]).applies_to("b"));
+        let domain = line(&["*.example.test", "!bad.example.test"]);
+        assert!(domain.applies_to("ok.example.test"));
+        assert!(!domain.applies_to("bad.example.test"));
+        assert!(
+            !line(&["!x"]).applies_to("y"),
+            "a negation alone matches nothing"
+        );
+    }
+
+    #[test]
+    fn user_host_lines_read_config_and_one_level_of_includes_but_not_sskd() {
+        let tmp = tempfile::tempdir().unwrap();
+        let d = tmp.path();
+        assert!(user_host_lines(d).unwrap().is_empty(), "no config file");
+        fs::create_dir_all(d.join("config.d")).unwrap();
+        fs::create_dir_all(d.join("ssk.d")).unwrap();
+        fs::write(
+            d.join("config.d/lan.conf"),
+            "host mybox other\n    HostName 10.0.0.5\nInclude deeper.inc\n",
+        )
+        .unwrap();
+        fs::write(d.join("config.d/deeper.inc"), "Host deep\n").unwrap();
+        fs::write(d.join("config.d/notes.txt"), "Host ignored\n").unwrap();
+        fs::write(d.join("ssk.d/work.conf"), "Host managed\n").unwrap();
+        fs::write(
+            d.join("config"),
+            format!(
+                "{}\n# Host commented\nHost=eq\nInclude config.d/*.conf ssk.d/*.conf missing.conf\nMatch host x\nHost *\n",
+                include_line(d)
+            ),
+        )
+        .unwrap();
+        let lines = user_host_lines(d).unwrap();
+        let pats: Vec<String> = lines.iter().map(|l| l.patterns.join(" ")).collect();
+        assert_eq!(pats, ["eq", "*", "mybox other"]);
+        assert_eq!(lines[0].file, d.join("config"));
+        assert_eq!(lines[2].file, d.join("config.d/lan.conf"));
     }
 }

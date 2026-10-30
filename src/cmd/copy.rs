@@ -207,7 +207,7 @@ pub fn run_targets(
                     host: target.host.clone(),
                     user: target.user.clone(),
                     port: target.port.unwrap_or(22),
-                    alias: opts.alias.clone().unwrap_or_else(|| target.host.clone()),
+                    alias: alias_for(opts, target),
                     installed: state::now(),
                 },
             );
@@ -239,7 +239,20 @@ pub fn run_targets(
         report(ui, identity, target, outcome);
         all_ok &= outcome.ok();
     }
+    // One host, one Host block: say what name ssh now answers to.
+    if opts.write_config
+        && let [(target, outcome)] = outcomes.as_slice()
+        && outcome.ok()
+        && outcome.key_present()
+    {
+        ui.hint(format!("ssh {}", alias_for(opts, target)));
+    }
     Ok(if all_ok { 0 } else { 1 })
+}
+
+/// The `Host` name written for `target`: `--alias`, else the host as typed.
+fn alias_for(opts: &CopyOptions, target: &Target) -> String {
+    opts.alias.clone().unwrap_or_else(|| target.host.clone())
 }
 
 /// Probe, install, verify for one host. Only I/O errors from spawning ssh are `Err`;

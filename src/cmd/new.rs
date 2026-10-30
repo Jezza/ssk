@@ -1,6 +1,7 @@
 //! `ssk new <IDENTITY>`: generate a key pair, write it, record it, show the public key.
 
 use std::io::{self, IsTerminal};
+use std::path::Path;
 
 use anyhow::{Context, bail};
 use zeroize::Zeroizing;
@@ -9,8 +10,9 @@ use crate::cmd::copy::{self, CopyOptions};
 use crate::identity::keygen::{self, KeySpec, KeyType};
 use crate::identity::{Identity, comment, name};
 use crate::settings::Settings;
-use crate::ssh::agent;
+use crate::ssh::{agent, config};
 use crate::state::{self, State};
+use crate::target::Target;
 use crate::ui::Ui;
 
 #[derive(clap::Parser, Debug)]
@@ -61,17 +63,33 @@ pub struct New {
     #[arg(short = 'f', long)]
     pub force: bool,
 
-    /// After creating, install the key on TARGET ([user@]host[:port]); repeatable
+    /// After creating, install the key on TARGET ([user@]host[:port]) and write ssh config
+    /// for it; repeatable
     #[arg(long, value_name = "TARGET", action = clap::ArgAction::Append)]
     pub copy: Vec<String>,
 
     /// Extra ssh option for --copy, passed through as -o (repeatable), e.g. ProxyJump=bastion
     #[arg(short = 'o', long = "ssh-option", value_name = "K=V", action = clap::ArgAction::Append, requires = "copy")]
     pub ssh_option: Vec<String>,
+
+    /// Host alias to write into ssh config for the --copy target [default: the identity
+    /// name, so `ssh <IDENTITY>` reaches it; with several targets, each host as typed]
+    #[arg(long, value_name = "NAME", requires = "copy")]
+    pub alias: Option<String>,
 }
 
 pub fn handle(settings: &Settings, ui: &Ui, args: &New) -> anyhow::Result<u8> {
     name::validate(&args.identity)?;
+    if let Some(alias) = &args.alias {
+        config::validate_alias(alias)?;
+        if args.copy.len() != 1 {
+            bail!(
+                "--alias applies to exactly one target; got {} --copy targets",
+                args.copy.len()
+            );
+        }
+    }
+    let targets = copy::parse_targets(&args.copy, None, None)?;
     let private_path = settings.ssh_dir.join(&args.identity);
     let public_path = settings.ssh_dir.join(format!("{}.pub", args.identity));
     if private_path.exists() || public_path.exists() {
@@ -146,9 +164,13 @@ pub fn handle(settings: &Settings, ui: &Ui, args: &New) -> anyhow::Result<u8> {
     let public_line = identity.public_key_line()?;
     print_summary(ui, "created", &identity, &public_line);
 
-    if !args.copy.is_empty() {
+    if !targets.is_empty() {
         ui.info("");
-        let targets = copy::parse_targets(&args.copy, None, None)?;
+        let alias = match (&args.alias, targets.as_slice()) {
+            (Some(a), _) => Some(a.clone()),
+            (None, [target]) => default_alias(ui, &settings.ssh_dir, &st, &args.identity, target)?,
+            (None, _) => None,
+        };
         let runner = copy::runner_for(settings)?;
         return copy::run_targets(
             settings,
@@ -157,6 +179,7 @@ pub fn handle(settings: &Settings, ui: &Ui, args: &New) -> anyhow::Result<u8> {
             &targets,
             &CopyOptions {
                 ssh_options: args.ssh_option.clone(),
+                alias,
                 write_config: settings.write_ssh_config,
                 ..Default::default()
             },
@@ -164,6 +187,61 @@ pub fn handle(settings: &Settings, ui: &Ui, args: &New) -> anyhow::Result<u8> {
         );
     }
     Ok(0)
+}
+
+/// A key made for one host gets a `Host` block named after itself, so `ssh <identity>`
+/// just works. `None` (the host as typed, as `copy` does) when that would clash or
+/// would not work: the name is already another deployment's block (ssh only ever reads
+/// the first), or a `Host` line of the user's own config applies to one of the two
+/// names but not the other, so `ssh <identity>` would hijack their block or lose the
+/// settings `ssh <host>` gets. A record of this identity on the same endpoint does not
+/// count, as the copy replaces it.
+fn default_alias(
+    ui: &Ui,
+    ssh_dir: &Path,
+    st: &State,
+    identity: &str,
+    target: &Target,
+) -> anyhow::Result<Option<String>> {
+    let host = &target.host;
+    if host == identity {
+        return Ok(None);
+    }
+    let replaced = |n: &str, d: &state::Deployment| {
+        n == identity
+            && d.host == *host
+            && d.user == target.user
+            && d.port == target.port.unwrap_or(22)
+    };
+    if let Some((n, _, d)) = st.aliased(identity).find(|(n, _, d)| !replaced(n, d)) {
+        ui.warn(format!(
+            "'{identity}' is already the alias of {n}: {}; using '{host}' instead (`ssk alias` can change it)",
+            d.endpoint()
+        ));
+        return Ok(None);
+    }
+    let lines = config::user_host_lines(ssh_dir)?;
+    if let Some(l) = lines
+        .iter()
+        .find(|l| l.applies_to(identity) && !l.applies_to(host))
+    {
+        ui.warn(format!(
+            "'{identity}' is already a Host in {}; using '{host}' instead (`ssk alias` can change it)",
+            l.file.display()
+        ));
+        return Ok(None);
+    }
+    if let Some(l) = lines
+        .iter()
+        .find(|l| l.applies_to(host) && !l.applies_to(identity))
+    {
+        ui.info(format!(
+            "'{host}' is a Host in {}; keeping that name so its settings still apply",
+            l.file.display()
+        ));
+        return Ok(None);
+    }
+    Ok(Some(identity.to_string()))
 }
 
 /// `None` means no passphrase. Precedence: `none`, `explicit`, `from_stdin`, prompt.

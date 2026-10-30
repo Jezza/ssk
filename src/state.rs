@@ -149,6 +149,22 @@ impl State {
             .unwrap_or(&[])
     }
 
+    /// Every deployment, of any identity, written as `Host <alias>`: (identity, index,
+    /// deployment). Every ssk.d file is included, so a clash across identities is still
+    /// a clash.
+    pub fn aliased<'a>(
+        &'a self,
+        alias: &'a str,
+    ) -> impl Iterator<Item = (&'a str, usize, &'a Deployment)> + 'a {
+        self.identity.iter().flat_map(move |(n, s)| {
+            s.deployments
+                .iter()
+                .enumerate()
+                .filter(move |(_, d)| d.alias == alias)
+                .map(move |(i, d)| (n.as_str(), i, d))
+        })
+    }
+
     pub fn remove_identity(&mut self, name: &str) -> Option<IdentityState> {
         self.identity.remove(name)
     }

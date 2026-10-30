@@ -66,13 +66,19 @@ $ ssk copy work jezza@dev.example.com --alias dev
 added `Include ~/.ssh/ssk.d/*.conf` to /home/jezza/.ssh/config
 ssh config written: /home/jezza/.ssh/ssk.d/work.conf
 ok jezza@dev.example.com: installed and verified
+next: ssh dev
 ```
 
 Targets are `[user@]host[:port]`, or a `Host` alias from your own ssh config.
 `-l` and `-p` set defaults for targets that leave the user or port out, and
 `-o ProxyJump=bastion` style options are passed through to ssh. `ssk new`
 takes `--copy TARGET` (and `-o` for it) too, for the common case of creating
-a key and installing it in one go.
+a key and installing it in one go. A key made for one host gets its `Host`
+block named after the identity, so `ssk new gem --copy 10.0.0.5` makes
+`ssh gem` work; `--alias NAME` picks another name, and with several `--copy`
+targets each block is named after its host, as `copy` does. When the target
+is itself a `Host` of your own config, or the identity name already is one,
+the block keeps the host's name instead and ssk says so.
 
 When a host has been reinstalled its key no longer matches `known_hosts`, and
 ssh refuses to connect. If you know why the key changed,

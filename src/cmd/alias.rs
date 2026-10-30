@@ -128,16 +128,11 @@ fn find(st: &State, identity: Option<&str>, target: &str) -> Vec<(String, usize)
         .unwrap_or_default()
 }
 
-/// Another deployment, of any identity, already written as `Host <alias>`. Every
-/// ssk.d file is included, so a clash across identities is still a clash.
+/// Another deployment, of any identity, already written as `Host <alias>`.
 fn taken_by(st: &State, alias: &str, me: (&str, usize)) -> Option<(String, usize)> {
-    st.identity.iter().find_map(|(n, s)| {
-        s.deployments
-            .iter()
-            .enumerate()
-            .find(|(i, d)| d.alias == alias && (n.as_str(), *i) != me)
-            .map(|(i, _)| (n.clone(), i))
-    })
+    st.aliased(alias)
+        .find(|(n, i, _)| (*n, *i) != me)
+        .map(|(n, i, _)| (n.to_string(), i))
 }
 
 fn describe(st: &State, name: &str, idx: usize) -> String {
